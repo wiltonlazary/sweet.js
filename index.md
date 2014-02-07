@@ -67,6 +67,7 @@ Use the `sjs` binary to compile your sweet.js code:
 * Ask for help at #sweet.js on irc.mozilla.org.
 * Join the [mailing list](https://groups.google.com/forum/#!forum/sweetjs).
 * Ping [@disnet](https://twitter.com/disnet) on Twitter.
+* Read a [tutorial](http://jlongster.com/Writing-Your-First-Sweet.js-Macro) on writing macros.
 
 # Getting Started 
 
