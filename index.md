@@ -363,6 +363,18 @@ variables:
     1 + 42 - 2
 
 
+If you want to bind multiple syntax objects to a pattern variable with `letstx` you can use the `...` syntax just like in a macro pattern:
+
+    macro m {
+      case {_ $x } => {
+        letstx $y ... = [makeValue(2, #{here}), makeValue(3, #{here})];
+        return #{[$x, $y (,) ...]}
+      }
+    }
+    m 1
+    // --> expands to
+    [1, 2, 3]
+
 ### Getting Dirty -- Breaking Hygiene
 
 Sometimes you really do need to break the wonderful protections

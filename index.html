@@ -439,6 +439,18 @@ m 1
 // --&gt; expands to
 1 + 42 - 2</code></pre>
 
+<p>If you want to bind multiple syntax objects to a pattern variable with <code>letstx</code> you can use the <code>...</code> syntax just like in a macro pattern:</p>
+
+<pre><code>macro m {
+  case {_ $x } =&gt; {
+    letstx $y ... = [makeValue(2, #{here}), makeValue(3, #{here})];
+    return #{[$x, $y (,) ...]}
+  }
+}
+m 1
+// --&gt; expands to
+[1, 2, 3]</code></pre>
+
 <h3 id='getting_dirty__breaking_hygiene'>Getting Dirty &#8211; Breaking Hygiene</h3>
 
 <p>Sometimes you really do need to break the wonderful protections provided by hygiene. Breaking hygiene is usually a bad idea but sweet.js won&#8217;t judge.</p>
