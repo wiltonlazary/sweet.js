@@ -474,6 +474,12 @@
             } while (pattern.repeat && success && rest.length > 0);
         }
 
+        // If we are in a delimiter and we haven't matched all the syntax, it
+        // was a failed match.
+        if (!topLevel && rest.length) {
+            success = false;
+        }
+
         var result;
         if (success) {
             result = rest.length ? stx.slice(0, -rest.length): stx;
@@ -855,6 +861,21 @@
             }, []).value();
     }
 
+
+    function cloneMatch(oldMatch) {
+        var newMatch = {
+            success: oldMatch.success,
+            rest: oldMatch.rest,
+            patternEnv: {}
+        };
+        for (var pat in oldMatch.patternEnv) {
+            if (oldMatch.patternEnv.hasOwnProperty(pat)) {
+                newMatch.patternEnv[pat] = oldMatch.patternEnv[pat];
+            }
+        }
+        return newMatch;
+    }
+
     exports.loadPattern = loadPattern;
     exports.matchPatterns = matchPatterns;
     exports.matchLookbehind = matchLookbehind;
@@ -863,4 +884,5 @@
     exports.takeLineContext = takeLineContext;
     exports.takeLine = takeLine;
     exports.typeIsLiteral = typeIsLiteral;
+    exports.cloneMatch = cloneMatch;
 }))

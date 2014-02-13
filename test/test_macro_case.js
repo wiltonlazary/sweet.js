@@ -80,6 +80,21 @@ describe "procedural (syntax-case) macros" {
         }
         expect(m 100).to.be(142);
     }
+
+    it "withSyntax should only modify its own scope" {
+        macro test {
+            case { _ $x } => {
+                function foo() {
+                    return #{ $x };
+                }
+                var x = #{ 12 };
+                return withSyntax($x = x) {
+                    return foo();
+                }
+            }
+        }
+        expect(test 42).to.be(42)
+    }
     
     it "should support withSyntax with multiple patterns" {
         macro m {
@@ -105,6 +120,17 @@ describe "procedural (syntax-case) macros" {
             }
         }
         expect(m 5).to.be(65);
+    }
+
+    it "should support shorthand withSyntax form" {
+        macro m {
+            case {_ $x } => {
+                return withSyntax($y = [makeValue(42, #{here})]) #{
+                    $x + $y
+                }
+            }
+        }
+        expect(m 100).to.be(142);
     }
     
     it "should support let bound macros" {
@@ -243,6 +269,18 @@ describe "procedural (syntax-case) macros" {
         expect (m (id foo) (id 200)).to.be("id")
         expect (m (100 foo) (100 200)).to.be("lit")
         expect (m (100 foo) (id 200)).to.be("other")
+    }
+
+    it "should handle taking the lexical context from a delimiter" {
+        let m = macro {
+            case {_ $tok } => {
+                letstx $foo = [makeIdent("foo", #{$tok})];
+                return #{$foo}
+            }
+        }
+
+        var foo = 100;
+        expect(m ()).to.be(100);
     }
 
 }

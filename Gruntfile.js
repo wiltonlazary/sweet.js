@@ -68,7 +68,16 @@ module.exports = function(grunt) {
                 flatten: true,
                 src: "build/lib/*.js",
                 dest: "lib/"
+            },
+
+            testFixtures: {
+                expand: true,
+                flatten: false,
+                cwd: "test/",
+                src: "fixtures/**",
+                dest: "build/"
             }
+
         },
         mochaTest: {
             test: {
@@ -115,6 +124,7 @@ module.exports = function(grunt) {
                 var output = sweet.compile(code, {
                     sourceMap: options.sourceMap,
                     filename: file,
+                    readableNames: true,
                     macros: moduleSrc
                 });
 
@@ -138,12 +148,17 @@ module.exports = function(grunt) {
 
     grunt.registerTask("dist", ["build:sweetjs", "copy:dist"]);
 
+    grunt.registerTask("test", ["build:test",
+                                "copy:testFixtures",
+                                "mochaTest"]);
+
     grunt.registerTask("default", ["copy:scopedEval",
                                    "copy:buildMacros",
                                    "build",
                                    "copy:browserSrc",
                                    "copy:browserMacros",
                                    "copy:scopedEvalBrowser",
+                                   "copy:testFixtures",
                                    "mochaTest",
                                    "jshint"]);
 

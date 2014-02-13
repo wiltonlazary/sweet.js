@@ -837,6 +837,14 @@ describe("macro expander", function() {
         expect(b(10)).to.be(12);
         var c = x -> x - 3; 
         expect(c(10)).to.be(7);
+    });
+
+    it("should work with multi punctuator macro names with `=` in them", function() {
+        let := = macro {
+            rule { $x } => { $x }
+        }
+
+        expect(:= 100).to.be(100);
     })
 
     it("should allow macros to override binary operators", function() {
@@ -939,6 +947,30 @@ describe("macro expander", function() {
         var b = a++;
         expect(a).to.be(2);
         expect(b).to.be(1);
+    });
+
+    it("should allow multi token macros to share the same root token", function() {
+        macro @foo {
+            rule {} => { 12 }
+        }
+
+        macro @bar {
+            rule {} => { 42 }
+        }
+
+        expect(@foo).to.be(12);
+        expect(@bar).to.be(42);
+    });
+    
+    it("should expand the call in a `new` constructor", function() {
+        macro m {
+          rule {} => { 42 }
+        }
+        function Ctr(fn) {
+            this.foo = fn();
+        }
+        var ctr = new Ctr(function() { return m });
+        expect(ctr.foo).to.be(42);
     });
 
 });
