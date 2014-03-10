@@ -50,6 +50,8 @@
     var codegen = typeof escodegen !== "undefined" ? escodegen : gen;
     var assert = syn.assert;
     var throwSyntaxError = syn.throwSyntaxError;
+    var throwSyntaxCaseError = syn.throwSyntaxCaseError;
+    var SyntaxCaseError = syn.SyntaxCaseError;
     var unwrapSyntax = syn.unwrapSyntax;
 
     macro _get_vars {
@@ -248,7 +250,6 @@
             return this;
         }
     }
-
 
     var scopedEval = se.scopedEval;
 
@@ -575,6 +576,14 @@
         }
     });
 
+    var AssignmentExpression = Expr.extend({
+        properties: ['left', 'op', 'right'],
+        construct: function(op, left, right) {
+            this.op = op;
+            this.left = left;
+            this.right = right;
+        }
+    });
 
     var Keyword = TermTree.extend({
         properties: ["keyword"],
@@ -848,14 +857,14 @@
         }
     })
 
-    function stxIsUnaryOp (stx) {
+    function stxIsUnaryOp(stx) {
         var staticOperators = ["+", "-", "~", "!",
                                 "delete", "void", "typeof",
                                 "++", "--"];
         return _.contains(staticOperators, unwrapSyntax(stx));
     }
 
-    function stxIsBinOp (stx) {
+    function stxIsBinOp(stx) {
         var staticOperators = ["+", "-", "*", "/", "%", "||", "&&", "|", "&", "^",
                                 "==", "!=", "===", "!==", 
                                 "<", ">", "<=", ">=", "in", "instanceof",
@@ -863,8 +872,14 @@
         return _.contains(staticOperators, unwrapSyntax(stx));
     }
 
+    function stxIsAssignOp(stx) {
+        var staticOperators = ["=", "+=", "-=", "*=", "/=", "%=",
+                               "<<=", ">>=", ">>>=",
+                               "|=", "^=", "&="];
+        return _.contains(staticOperators, unwrapSyntax(stx));
+    }
+
     function enforestVarStatement(stx, context, varStx) {
-        var isLet = /^(?:let|const)$/.test(varStx.token.value);
         var decls = [];
         var rest = stx;
         var rhs;
@@ -873,17 +888,13 @@
             throwSyntaxError("enforest", "Unexpected end of input", varStx);
         }
 
+        if(expandCount >= maxExpands) {
+            return null;
+        }
+
         while (rest.length) {
             if (rest[0].token.type === parser.Token.Identifier) {
-                if (isLet) {
-                    var freshName = fresh();
-                    var renamedId = rest[0].rename(rest[0], freshName);
-                    rest = rest.map(function(stx) {
-                        return stx.rename(rest[0], freshName);
-                    });
-                    rest[0] = renamedId;
-                }
-                if (rest[1].token.type === parser.Token.Punctuator &&
+                if (rest[1] && rest[1].token.type === parser.Token.Punctuator &&
                     rest[1].token.value === "=") {
                     rhs = get_expression(rest.slice(2), context);
                     if (rhs.result == null) {
@@ -899,7 +910,7 @@
                         rest = rhs.rest;
                         break;
                     }
-                } else if (rest[1].token.type === parser.Token.Punctuator &&
+                } else if (rest[1] && rest[1].token.type === parser.Token.Punctuator &&
                            rest[1].token.value === ",") {
                     decls.push(VariableDeclaration.create(rest[0], null, null, rest[1]));
                     rest = rest.slice(2);
@@ -916,6 +927,53 @@
         return {
             result: decls,
             rest: rest
+        }
+    }
+
+    function enforestOperator(stx, context, leftTerm, prevStx, prevTerms) {
+        var opPrevStx, opPrevTerms, opRes, isAssign = stxIsAssignOp(stx[0]);
+
+        // Check if the operator is a macro first.
+        if (nameInEnv(stx[0], stx.slice(1), context.env)) {
+            var headStx = tagWithTerm(leftTerm, leftTerm.destruct().reverse());
+            opPrevStx = headStx.concat(prevStx);
+            opPrevTerms = [leftTerm].concat(prevTerms);
+            opRes = enforest(stx, context, opPrevStx, opPrevTerms);
+
+            if (opRes.prevTerms.length < opPrevTerms.length) {
+                return opRes;
+            } else if(opRes.result) {
+                return { result: leftTerm,
+                         rest: opRes.result.destruct().concat(opRes.rest) };
+            }
+        }
+
+        var op = stx[0];
+        var left = leftTerm;
+        var rightStx = stx.slice(1);
+
+        opPrevStx = [stx[0]].concat(leftTerm.destruct().reverse(), prevStx);
+        opPrevTerms = [Punc.create(stx[0]), leftTerm].concat(prevTerms);
+        opRes = enforest(rightStx, context, opPrevStx, opPrevTerms);
+
+        if(opRes.result) {
+            // Lookbehind was matched, so it may not even be a binop anymore.
+            if (opRes.prevTerms.length < opPrevTerms.length) {
+                return opRes;
+            }
+
+            var right = opRes.result;
+            // only a binop if the right is a real expression
+            // so 2+2++ will only match 2+2
+            if (right.hasPrototype(Expr)) {
+                var term = (isAssign ?
+                            AssignmentExpression.create(op, left, right) :
+                            BinOp.create(op, left, right)); 
+                return { result: term, rest: opRes.rest };
+            }
+        }
+        else {
+            return opRes;
         }
     }
 
@@ -1041,13 +1099,13 @@
         }
     }
 
-    function getMacroInEnv(head, rest, context) {
+    function getMacroInEnv(head, rest, env) {
         var name = getName(head, rest);
         // simple case, don't need to create a new syntax object
         if (name.length === 1) {
             var resolvedName = resolve(name[0]);
-            if (context.env.has(resolvedName)) {
-                return context.env.get(resolvedName);
+            if (env.has(resolvedName)) {
+                return env.get(resolvedName);
             }
             return null;
         } else {
@@ -1055,9 +1113,9 @@
                 var nameStr = name.map(unwrapSyntax).join("");
                 var nameStx = syn.makeIdent(nameStr, name[0]);
                 var resolvedName = resolve(nameStx);
-                var inEnv = context.env.has(resolvedName);
+                var inEnv = env.has(resolvedName);
                 if (inEnv) {
-                    return context.env.get(resolvedName);
+                    return env.get(resolvedName);
                 }
                 name.pop();
             }
@@ -1065,11 +1123,11 @@
         }
     }
 
-    function nameInEnv(head, rest, context) {
+    function nameInEnv(head, rest, env) {
         if (head.token.type === parser.Token.Identifier ||
             head.token.type === parser.Token.Keyword ||
             head.token.type === parser.Token.Punctuator) {
-            return getMacroInEnv(head, rest, context) !== null;
+            return getMacroInEnv(head, rest, env) !== null;
         }
         return false;
     }
@@ -1081,6 +1139,11 @@
 
         prevStx = prevStx || [];
         prevTerms = prevTerms || [];
+
+        if(expandCount >= maxExpands) {
+            return { result: null,
+                     rest: toks };
+        }
 
         function step(head, rest) {
             var innerTokens;
@@ -1099,6 +1162,9 @@
                         innerTokens = rest[0].token.inner;
                         while (innerTokens.length > 0) {
                             argRes = enforest(innerTokens, context);
+                            if(!argRes.result) {
+                                break;
+                            }
                             enforestedArgs.push(argRes.result);
                             innerTokens = argRes.rest;
                             if (innerTokens[0] && innerTokens[0].token.value === ",") {
@@ -1132,20 +1198,22 @@
                     Expr(emp) | (rest[0] && resolve(rest[0]) === "?") => {
                         var question = rest[0];
                         var condRes = enforest(rest.slice(1), context);
-                        var truExpr = condRes.result;
-                        var condRight = condRes.rest;
-                        if(truExpr.hasPrototype(Expr) &&
-                           condRight[0] && resolve(condRight[0]) === ":") {
-                            var colon = condRight[0];
-                            var flsRes = enforest(condRight.slice(1), context);
-                            var flsExpr = flsRes.result;
-                            if(flsExpr.hasPrototype(Expr)) {
-                                return step(ConditionalExpression.create(head,
-                                                                         question,
-                                                                         truExpr,
-                                                                         colon,
-                                                                         flsExpr),
-                                            flsRes.rest);
+                        if(condRes.result) {
+                            var truExpr = condRes.result;
+                            var condRight = condRes.rest;
+                            if(truExpr.hasPrototype(Expr) &&
+                               condRight[0] && resolve(condRight[0]) === ":") {
+                                var colon = condRight[0];
+                                var flsRes = enforest(condRight.slice(1), context);
+                                var flsExpr = flsRes.result;
+                                if(flsExpr.hasPrototype(Expr)) {
+                                    return step(ConditionalExpression.create(head,
+                                                                             question,
+                                                                             truExpr,
+                                                                             colon,
+                                                                             flsExpr),
+                                                flsRes.rest);
+                                }
                             }
                         }
                     }
@@ -1153,7 +1221,7 @@
                     // Constructor
                     Keyword(keyword) | (resolve(keyword) === "new" && rest[0]) => {
                         var newCallRes = enforest(rest, context);
-                        if(newCallRes.result.hasPrototype(Call)) {
+                        if(newCallRes && newCallRes.result.hasPrototype(Call)) {
                             return step(Const.create(head, newCallRes.result),
                                         newCallRes.rest);
                         }
@@ -1165,7 +1233,7 @@
                                          rest[0].token.type === parser.Token.Punctuator &&
                                          resolve(rest[0]) === "=>") => {
                         var arrowRes = enforest(rest.slice(1), context);
-                        if (arrowRes.result.hasPrototype(Expr)) {
+                        if (arrowRes.result && arrowRes.result.hasPrototype(Expr)) {
                             return step(ArrowFun.create(delim, rest[0], arrowRes.result.destruct()), 
                                         arrowRes.rest);
                         } else {
@@ -1178,7 +1246,7 @@
                                  rest[0].token.type === parser.Token.Punctuator &&
                                  resolve(rest[0]) === "=>") => {
                         var res = enforest(rest.slice(1), context);
-                        if (res.result.hasPrototype(Expr)) {
+                        if (res.result && res.result.hasPrototype(Expr)) {
                             return step(ArrowFun.create(id, rest[0], res.result.destruct()), 
                                         res.rest);
                         } else {
@@ -1207,43 +1275,22 @@
 
                     // BinOp
                     Expr(emp) | (rest[0] && rest[1] && stxIsBinOp(rest[0])) => {
-                        var bopPrevStx, bopPrevTerms, bopRes;
-                        var bopName = resolve(rest[0]);
+                       var opRes = enforestOperator(rest, context, head, prevStx, prevTerms);
+                       if(opRes && opRes.result) {
+                           return step(opRes.result, opRes.rest, prevStx, prevTerms);
+                       }
+                    }
 
-                        // Check if the operator is a macro first.
-                        if (nameInEnv(rest[0], rest.slice(1), context)) {
-                            var headStx = tagWithTerm(head, head.destruct().reverse());
-                            bopPrevStx = headStx.concat(prevStx);
-                            bopPrevTerms = [head].concat(prevTerms);
-                            bopRes = enforest(rest, context, bopPrevStx, bopPrevTerms);
-
-                            if (bopRes.prevTerms.length < bopPrevTerms.length) {
-                                return bopRes;
-                            } else {
-                                return step(head,
-                                            bopRes.result.destruct().concat(bopRes.rest));
-                            }
-                        }
-
-                        var op = rest[0];
-                        var left = head;
-                        var rightStx = rest.slice(1);
-
-                        bopPrevStx = [rest[0]].concat(head.destruct().reverse(), prevStx);
-                        bopPrevTerms = [Punc.create(rest[0]), head].concat(prevTerms);
-                        bopRes = enforest(rightStx, context, bopPrevStx, bopPrevTerms);
-
-                        // Lookbehind was matched, so it may not even be a binop anymore.
-                        if (bopRes.prevTerms.length < bopPrevTerms.length) {
-                            return bopRes;
-                        }
-
-                        var right = bopRes.result;
-                        // only a binop if the right is a real expression
-                        // so 2+2++ will only match 2+2
-                        if (right.hasPrototype(Expr)) {
-                            return step(BinOp.create(op, left, right), bopRes.rest);
-                        }
+                    // AssignmentExpression
+                    Expr(emp) | ((head.hasPrototype(Id) ||
+                                  head.hasPrototype(ObjGet) ||
+                                  head.hasPrototype(ObjDotGet) ||
+                                  head.hasPrototype(ThisExpression)) &&
+                                rest[0] && rest[1] && stxIsAssignOp(rest[0])) => {
+                       var opRes = enforestOperator(rest, context, head, prevStx, prevTerms);
+                       if(opRes && opRes.result) {
+                           return step(opRes.result, opRes.rest, prevStx, prevTerms);
+                       }
                     }
 
                     // UnaryOp (via punctuation)
@@ -1255,14 +1302,16 @@
                         var unopPrevTerms = [head].concat(prevTerms);
                         var unopRes = enforest(rest, context, unopPrevStx, unopPrevTerms);
 
-                        // Lookbehind was matched, so it may not even be a unop anymore
-                        if (unopRes.prevTerms.length < unopPrevTerms.length) {
-                            return unopRes;
-                        }
+                        if(unopRes.result) {
+                            // Lookbehind was matched, so it may not even be a unop anymore
+                            if (unopRes.prevTerms.length < unopPrevTerms.length) {
+                                return unopRes;
+                            }
 
-                        if (unopRes.result.hasPrototype(Expr)) {
-                            return step(UnaryOp.create(punc, unopRes.result),
-                                        unopRes.rest);
+                            if (unopRes.result.hasPrototype(Expr)) {
+                                return step(UnaryOp.create(punc, unopRes.result),
+                                            unopRes.rest);
+                            }
                         }
                     }
 
@@ -1275,14 +1324,16 @@
                         var unopKeyPrevTerms = [head].concat(prevTerms);
                         var unopKeyres = enforest(rest, context, unopKeyPrevStx, unopKeyPrevTerms);
 
-                        // Lookbehind was matched, so it may not even be a unop anymore
-                        if (unopKeyres.prevTerms.length < unopKeyPrevTerms.length) {
-                            return unopKeyres;
-                        }
+                        if(unopKeyres.result) {
+                            // Lookbehind was matched, so it may not even be a unop anymore
+                            if (unopKeyres.prevTerms.length < unopKeyPrevTerms.length) {
+                                return unopKeyres;
+                            }
 
-                        if (unopKeyres.result.hasPrototype(Expr)) {
-                            return step(UnaryOp.create(keyword, unopKeyres.result),
-                                        unopKeyres.rest);
+                            if (unopKeyres.result.hasPrototype(Expr)) {
+                                return step(UnaryOp.create(keyword, unopKeyres.result),
+                                            unopKeyres.rest);
+                            }
                         }
                     }
 
@@ -1298,7 +1349,7 @@
                             
                             if (opRes.prevTerms.length < opPrevTerms.length) {
                                 return opRes;
-                            } else {
+                            } else if(opRes.result) {
                                 return step(head,
                                             opRes.result.destruct().concat(opRes.rest));
                             }
@@ -1327,7 +1378,7 @@
 
                             if (dotRes.prevTerms.length < dotTerms.length) {
                                 return dotRes;
-                            } else {
+                            } else if(dotRes.result) {
                                 return step(head,
                                             [rest[0]].concat(dotRes.result.destruct(), dotRes.rest));
                             }
@@ -1359,33 +1410,27 @@
                     
                     Keyword(keyword) | (resolve(keyword) === "let") => {
                         var nameTokens = [];
-                        for (var i = 0; i < rest.length; i++) {
-                            if (rest[i].token.type === parser.Token.Punctuator && rest[i].token.value === "=" &&
-                                rest[i+1] && rest[i+1].token.value === "macro" &&
-                                rest[i+2] && rest[i+2].token.type === parser.Token.Delimiter && rest[i+2].token.value == "{}") {
-                                break;
-                            } else if (i > 0 && rest[i - 1].token.range[1] !== rest[i].token.range[0]) {
-                                throwSyntaxError("enforest", "Multi token macro names must not contain spaces between tokens", rest[i]);
-                            } else if (rest[i].token.type === parser.Token.Keyword ||
-                                       rest[i].token.type === parser.Token.Punctuator ||
-                                       rest[i].token.type === parser.Token.Identifier) {
-                                nameTokens.push(rest[i]);
-                            } else {
-                                throwSyntaxError("enforest", "Macro name must be a legal identifier or punctuator", rest[i]);
-                            }
+                        if (rest[0] && rest[0].token.type === parser.Token.Delimiter &&
+                            rest[0].token.value === "()") {
+                            nameTokens = rest[0].token.inner;
+                        } else {
+                            nameTokens.push(rest[0]);
                         }
 
                         // Let macro
-                        if (rest[i + 1] && rest[i + 1].token.value === "macro") {
-                            var mac = enforest(rest.slice(i + 1), context);
-                            if (!mac.result.hasPrototype(AnonMacro)) {
-                                throwSyntaxError("enforest", "expecting an anonymous macro definition in syntax let binding", rest.slice(i + 1));
+                        if (rest[1] && rest[1].token.value === "=" &&
+                            rest[2] && rest[2].token.value === "macro") {
+                            var mac = enforest(rest.slice(2), context);
+                            if(mac.result) {
+                                if (!mac.result.hasPrototype(AnonMacro)) {
+                                    throwSyntaxError("enforest", "expecting an anonymous macro definition in syntax let binding", rest.slice(2));
+                                }
+                                return step(LetMacro.create(nameTokens, mac.result.body), mac.rest);
                             }
-                            return step(LetMacro.create(nameTokens, mac.result.body), mac.rest);
                         // Let statement
                         } else {
                             var lsRes = enforestVarStatement(rest, context, keyword);
-                            if (lsRes) {
+                            if (lsRes && lsRes.result) {
                                 return step(LetStatement.create(head, lsRes.result),
                                             lsRes.rest);
                             }
@@ -1396,7 +1441,7 @@
                     // VariableStatement
                     Keyword(keyword) | (resolve(keyword) === "var" && rest[0]) => {
                         var vsRes = enforestVarStatement(rest, context, keyword);
-                        if (vsRes) {
+                        if (vsRes && vsRes.result) {
                             return step(VariableStatement.create(head, vsRes.result),
                                         vsRes.rest);
                         }
@@ -1404,7 +1449,7 @@
                     // Const Statement
                     Keyword(keyword) | (resolve(keyword) === "const" && rest[0]) => {
                         var csRes = enforestVarStatement(rest, context, keyword);
-                        if (csRes) {
+                        if (csRes && csRes.result) {
                             return step(ConstStatement.create(head, csRes.result),
                                         csRes.rest);
                         }
@@ -1419,7 +1464,7 @@
                     Keyword(keyword) | (resolve(keyword) === "yield") => {
                         var yieldExprRes = enforest(rest, context);
 
-                        if (yieldExprRes.result.hasPrototype(Expr)) {
+                        if (yieldExprRes.result && yieldExprRes.result.hasPrototype(Expr)) {
                             return step(YieldExpression.create(keyword, yieldExprRes.result),
                                         yieldExprRes.rest);
                         }
@@ -1433,10 +1478,10 @@
                      head.token.type === parser.Token.Keyword ||
                      head.token.type === parser.Token.Punctuator) && 
                     (expandCount < maxExpands) &&
-                    nameInEnv(head, rest, context)) {
+                    nameInEnv(head, rest, context.env)) {
 
                     // pull the macro transformer out the environment
-                    var macroObj = getMacroInEnv(head, rest, context);
+                    var macroObj = getMacroInEnv(head, rest, context.env);
                     var transformer = macroObj.fn;
 
                     // create a new mark to be used for the input to
@@ -1444,17 +1489,12 @@
                     var newMark = fresh();
                     var transformerContext = makeExpanderContext(_.defaults({mark: newMark}, context));
 
-
-                    if(!builtinMode && !macroObj.builtin) {
-                        expandCount++;
-                    }
-
                     // apply the transformer
                     var rt;
                     try {
                         rt = transformer([head].concat(rest.slice(macroObj.fullName.length - 1)), transformerContext, prevStx, prevTerms);
                     } catch (e) {
-                        if (e.type && e.type === "SyntaxCaseError") {
+                        if (e instanceof SyntaxCaseError) {
                             // add a nicer error for syntax case
                             var argumentString = "`" + rest.slice(0, 5).map(function(stx) {
                                 return stx.token.value;
@@ -1468,6 +1508,10 @@
                             // just rethrow it
                             throw e;
                         } 
+                    }
+
+                    if (!builtinMode && !macroObj.builtin) {
+                        expandCount++;
                     }
 
                     if (rt.prevTerms) {
@@ -1505,26 +1549,17 @@
                 } else if (head.token.type === parser.Token.Identifier &&
                            head.token.value === "macro") {
                     var nameTokens = [];
-                    for (var i = 0; i < rest.length; i++) {
-                        // done with the name once we find the delimiter
-                        if (rest[i].token.type === parser.Token.Delimiter) {
-                            break;
-                        } else if (i > 0 && rest[i - 1].token.range[1] !== rest[i].token.range[0]) {
-                            throwSyntaxError("enforest", "Multi token macro names must not contain spaces between tokens", rest[i]);
-                        } else if (rest[i].token.type === parser.Token.Identifier ||
-                                   rest[i].token.type === parser.Token.Keyword ||
-                                   rest[i].token.type === parser.Token.Punctuator) {
-                            nameTokens.push(rest[i]);
-                        } else {
-                            throwSyntaxError("enforest", "Macro name must be a legal identifier or punctuator", rest[i]);
-                        }
-
-                    }
-                    if (rest[i] && rest[i].token.type === parser.Token.Delimiter) {
-                        return step(Macro.create(nameTokens, rest[i].expose().token.inner),
-                                    rest.slice(i + 1));
+                    if (rest[0] && rest[0].token.type === parser.Token.Delimiter &&
+                        rest[0].token.value === "()") {
+                        nameTokens = rest[0].expose().token.inner;
                     } else {
-                        throwSyntaxError("enforest", "Macro declaration must include body", rest[i]);
+                        nameTokens.push(rest[0])
+                    }
+                    if (rest[1] && rest[1].token.type === parser.Token.Delimiter) {
+                        return step(Macro.create(nameTokens, rest[1].expose().token.inner),
+                                    rest.slice(2));
+                    } else {
+                        throwSyntaxError("enforest", "Macro declaration must include body", rest[1]);
                     }
                 // module definition
                 } else if (unwrapSyntax(head) === "module" && 
@@ -1678,6 +1713,9 @@
 
     function get_expression(stx, context) {
         var res = enforest(stx, context);
+        if(!res.result) {
+            return res;
+        }
         var next = res;
         var peek;
         var prevStx;
@@ -1690,7 +1728,7 @@
         }
 
         while (next.rest.length &&
-                nameInEnv(next.rest[0], next.rest.slice(1), context)) {
+                nameInEnv(next.rest[0], next.rest.slice(1), context.env)) {
 
             // Enforest the next term tree since it might be an infix macro that
             // consumes the initial expression.
@@ -1832,13 +1870,17 @@
             },
             unwrapSyntax: syn.unwrapSyntax,
             throwSyntaxError: throwSyntaxError,
+            throwSyntaxCaseError: throwSyntaxCaseError,
             prettyPrint: syn.prettyPrint,
             parser: parser,
             __fresh: fresh,
             _: _,
             patternModule: patternModule,
+            getPattern: function(id) {
+                return context.patternMap.get(id);
+            },
             getTemplate: function(id) {
-                return cloneSyntaxArray(context.templateMap.get(id));
+                return syn.cloneSyntaxArray(context.templateMap.get(id));
             },
             applyMarkToPatternEnv: applyMarkToPatternEnv,
             mergeMatches: function(newMatch, oldMatch) {
@@ -1849,22 +1891,13 @@
 
         return macroFn;
     }
-    function cloneSyntaxArray(arr) {
-        return arr.map(function(stx) {
-            var o = syntaxFromToken(_.clone(stx.token), stx);
-            if (o.token.type === parser.Token.Delimiter) {
-                o.token.inner = cloneSyntaxArray(o.token.inner);
-            }
-            return o;
-        });
-    }
 
     // similar to `parse1` in the honu paper
     // ([Syntax], Map) -> {terms: [TermTree], env: Map}
     function expandToTermTree(stx, context) {
         assert(context, "expander context is required");
 
-        var f, head, prevStx, prevTerms, macroDefinition;
+        var f, head, prevStx, restStx, prevTerms, macroDefinition;
         var rest = stx;
 
         while (rest.length > 0) {
@@ -1875,6 +1908,12 @@
             head = f.result;
             // rest :: [Syntax]
             rest = f.rest;
+
+            if (!head) {
+                // no head means the expansions stopped prematurely (for stepping)
+                restStx = rest;
+                break;
+            }
 
             if (head.hasPrototype(Macro) && expandCount < maxExpands) {
                 // load the macro definition into the environment and continue expanding
@@ -1923,7 +1962,9 @@
                 addToDefinitionCtx([head.name], context.defscope, true);
             }
 
-            if (head.hasPrototype(VariableStatement)) {
+            if (head.hasPrototype(VariableStatement) ||
+                head.hasPrototype(LetStatement) ||
+                head.hasPrototype(ConstStatement)) {
                 addToDefinitionCtx(_.map(head.decls, function(decl) { return decl.ident; }),
                                    context.defscope,
                                    true)
@@ -1993,6 +2034,7 @@
             // prevTerms are stored in reverse for the purposes of infix
             // lookbehind matching, so we need to re-reverse them.
             terms: prevTerms ? prevTerms.reverse() : [],
+            restStx: restStx,
             context: context,
         };
     }
@@ -2037,7 +2079,6 @@
     function expandTermTreeToFinal (term, context) {
         assert(context && context.env, "environment map is required");
 
-
         if (term.hasPrototype(ArrayLiteral)) {
             term.array.delim.token.inner = expand(term.array.delim.expose().token.inner, context);
             return term;
@@ -2059,16 +2100,22 @@
         } else if (term.hasPrototype(UnaryOp)) {
             term.expr = expandTermTreeToFinal(term.expr, context);
             return term;
-        } else if (term.hasPrototype(BinOp)) {
+        } else if (term.hasPrototype(BinOp) || term.hasPrototype(AssignmentExpression)) {
             term.left = expandTermTreeToFinal(term.left, context);
             term.right = expandTermTreeToFinal(term.right, context);
             return term;
         } else if (term.hasPrototype(ObjGet)) {
+            term.left = expandTermTreeToFinal(term.left, context);
             term.right.delim.token.inner = expand(term.right.delim.expose().token.inner, context);
             return term;
         } else if (term.hasPrototype(ObjDotGet)) {
             term.left = expandTermTreeToFinal(term.left, context);
             term.right = expandTermTreeToFinal(term.right, context);
+            return term;
+        } else if (term.hasPrototype(ConditionalExpression)) {
+            term.cond = expandTermTreeToFinal(term.cond, context);
+            term.tru = expandTermTreeToFinal(term.tru, context);
+            term.fls = expandTermTreeToFinal(term.fls, context);
             return term;
         } else if (term.hasPrototype(VariableDeclaration)) {
             if (term.init) {
@@ -2131,6 +2178,19 @@
             var expandedResult = expandToTermTree(renamedBody.token.inner, bodyContext);
             var bodyTerms = expandedResult.terms;
 
+            if(expandedResult.restStx) {
+                // The expansion was halted prematurely. Just stop and
+                // return what we have so far, along with the rest of the syntax
+                renamedBody.token.inner = expandedResult.terms.concat(expandedResult.restStx);
+                if(Array.isArray(term.body)) {
+                    term.body = renamedBody.token.inner;
+                }
+                else {
+                    term.body = renamedBody;
+                }
+                return term;
+            }
+
             var renamedParams = _.map(paramNames, function(p) { return p.renamedParam});
             var flatArgs;
             if (paramSingleIdent) {
@@ -2151,10 +2211,18 @@
                 // add the definition context to the result of
                 // expansion (this makes sure that syntax objects
                 // introduced by expansion have the def context)
-                var termWithCtx = bodyTerm.addDefCtx(newDef);
-                // finish expansion
-                return expandTermTreeToFinal(termWithCtx,
-                                             expandedResult.context);
+                if (bodyTerm.hasPrototype(Block)) {
+                    // we need to expand blocks before adding the defctx since
+                    // blocks defer macro expansion.
+                    var blockFinal = expandTermTreeToFinal(bodyTerm, 
+                                                           expandedResult.context);
+                    return blockFinal.addDefCtx(newDef);
+                } else {
+                    var termWithCtx = bodyTerm.addDefCtx(newDef);
+                    // finish expansion
+                    return expandTermTreeToFinal(termWithCtx,
+                                                 expandedResult.context);
+                }
             })
             
             if (term.hasPrototype(Module)) {
@@ -2188,9 +2256,15 @@
         assert(context, "must provide an expander context");
         
         var trees = expandToTermTree(stx, context);
-        return _.map(trees.terms, function(term) {
+        var terms = _.map(trees.terms, function(term) {
             return expandTermTreeToFinal(term, trees.context);
-        })
+        });
+
+        if(trees.restStx) {
+            terms.push.apply(terms, trees.restStx);
+        }
+
+        return terms;
     }
 
     function makeExpanderContext(o) {
@@ -2207,6 +2281,8 @@
                        writable: false, enumerable: true, configurable: false},
             templateMap: {value: o.templateMap || new StringMap(),
                           writable: false, enumerable: true, configurable: false},
+            patternMap: {value: o.patternMap || new StringMap(),
+                         writable: false, enumerable: true, configurable: false},
             mark: {value: o.mark,
                           writable: false, enumerable: true, configurable: false}
         });
@@ -2343,6 +2419,9 @@
 
     exports.resolve = resolve;
     exports.get_expression = get_expression;
+    exports.getName = getName;
+    exports.getMacroInEnv = getMacroInEnv;
+    exports.nameInEnv = nameInEnv;
 
     exports.makeExpanderContext = makeExpanderContext;
 

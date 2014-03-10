@@ -803,13 +803,13 @@ describe("macro expander", function() {
     });
 
     it("should work with multi punctuator macro names", function() {
-        macro -> {
+        macro (->) {
             rule { $x } => { $x }
         } 
 
         expect(-> 100).to.be(100);
 
-        macro function? {
+        macro (function?) {
             rule { ($x ...) } => {
                 typeof $x ... === "function"
             }
@@ -818,14 +818,14 @@ describe("macro expander", function() {
     });
 
     it("should work with multi punctuator macro names and let macros", function() {
-        let -> = macro {
+        let (->) = macro {
             rule { $x } => { $x }
         } 
         expect(-> 100).to.be(100);
     });
 
     it("should work with multi punctuator infix macros", function() {
-        let -> = macro {
+        let (->) = macro {
             rule infix { $arg:ident | $body:expr } => {
                 function($arg) { return $body }
             }
@@ -840,7 +840,7 @@ describe("macro expander", function() {
     });
 
     it("should work with multi punctuator macro names with `=` in them", function() {
-        let := = macro {
+        let (:=) = macro {
             rule { $x } => { $x }
         }
 
@@ -950,11 +950,11 @@ describe("macro expander", function() {
     });
 
     it("should allow multi token macros to share the same root token", function() {
-        macro @foo {
+        macro (@foo) {
             rule {} => { 12 }
         }
 
-        macro @bar {
+        macro (@bar) {
             rule {} => { 42 }
         }
 
@@ -973,4 +973,171 @@ describe("macro expander", function() {
         expect(ctr.foo).to.be(42);
     });
 
+    it("should eagerly expand using invoke", function() {
+        macro a {
+            rule { $num } => { 
+                $num + 42
+            }
+        }
+        macro b {
+            rule { $num:invoke(a) } => {
+                $num
+            }
+        }
+
+        expect(b 100).to.be(142);
+    });
+
+    it("should eagerly expand once using invokeOnce", function() {
+        macro a {
+            rule { $num } => {
+                3
+            }
+        }
+        macro b {
+            rule { $num } => {
+                a 2
+            }
+        }
+        macro c {
+            case { _ $num:invokeOnce(b) } => {
+                return [makeValue(#{ $num }.length === 2, #{ here })];
+            }
+        }
+        expect(c 1).to.be(true);
+    });
+
+    it("should eagerly expand recursively using invoke", function() {
+        macro a {
+            rule { $num } => {
+                3
+            }
+        }
+        macro b {
+            rule { $num } => {
+                a 2
+            }
+        }
+        macro c {
+            case { _ $num:invoke(b) } => {
+                return [makeValue(#{ $num }.length === 1, #{ here })];
+            }
+        }
+        expect(c 1).to.be(true);
+    });
+
+    it("should eagerly expand using invoke in a repeater", function() {
+        macro a {
+            rule { $num } => {
+                $num - 1
+            }
+        }
+        macro b {
+            rule { $num:invoke(a) ... } => {
+                $num (+) ...
+            }
+        }
+        expect(b 1 2 3).to.be(3);
+    });
+
+    it("should fall through to the next rule when invoke fails", function() {
+        macro a {
+            rule { $num:lit } => {
+                $num
+            }
+        }
+        macro b {
+            rule { $num:invoke(a) } => {
+                false
+            }
+            rule { $num } => {
+                true
+            }
+        }
+        expect(b foo).to.be(true);
+    });
+
+    it("should support invoke inside delimiters", function() {
+        macro a {
+            rule { $num:lit } => {
+                $num + 42
+            }
+        }
+        macro b {
+            rule { ($num:invoke(a)) } => {
+               $num
+            }
+        }
+        expect(b(100)).to.be(142);
+    });
+
+    it("should implicitly call invoke with custom pattern classes", function() {
+        macro a {
+            rule { $num } => { 
+                $num + 42
+            }
+        }
+        macro b {
+            rule { $num:a } => {
+                $num
+            }
+        }
+
+        expect(b 100).to.be(142);
+    })
+
+    it("should support identity rules", function() {
+        macro m {
+          rule { 42 }
+        }
+
+        expect(m 42).to.be(42);
+    });
+
+    it("should support complex identity rules", function() {
+        macro m {
+          rule { (1 + $a:lit) + 3 + $rest (+) ... }
+        }
+
+        expect(m (1 + 2) + 3 + 4 + 5).to.be(15);
+    });
+
+    it("should support wildcards in identity rules", function() {
+      macro m {
+        rule { _ + _ + _ }
+      }
+      expect(m 1 + 2 + 3).to.be(6);
+    });
+
+    it("should match literal underscores in literal groups", function() {
+        macro m {
+            rule { $[_] } => { 42 }
+            rule { $tok } => { 12 }
+        }
+        expect(m foo).to.be(12);
+        expect(m _).to.be(42);
+    });
+
+    it("should allow transcription of delims in repeaters more than once", function() {
+        macro m {
+          rule { ($foo ...) } => {
+            $foo ... .concat($foo ...)
+          }
+        }
+        expect(m([1, 2, 3])).to.eql([1, 2, 3, 1, 2, 3]);
+    });
+
+    it("should allow expansion on the left side of an object get", function () {
+        macro m { rule { $x } => { $x } }
+        expect((m [100])[0]).to.be(100);
+    });
+    it("should allow expansion in a ternary expression", function () {
+        macro m { rule { $x } => { $x } }
+        var x = 42;
+        var y = 10;
+        expect(true ? (m x) : (m y)).to.be(x);
+        expect(false ? (m x) : (m y)).to.be(y);
+        expect((m (1==1)) ? (m x) : (m y)).to.be(x);
+        expect((m (1!=1)) ? (m x) : (m y)).to.be(y);
+    });
 });

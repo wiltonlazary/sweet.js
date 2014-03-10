@@ -28,7 +28,8 @@
         var path        = require('path');
         var fs          = require('fs');
         var resolveSync = require('resolve/lib/sync');
-
+        var codegen     = require('escodegen');
+        
         var lib  = path.join(path.dirname(fs.realpathSync(__filename)), "../macros");
 
         var stxcaseModule = fs.readFileSync(lib + "/stxcase.js", 'utf8');
@@ -182,7 +183,10 @@
         if (moduleName[0] === '.') {
             moduleName = path.resolve(root, moduleName)
         }
-        var filename = resolveSync(moduleName, {basedir: root});
+        var filename = resolveSync(moduleName, {
+            basedir: root,
+            extensions: ['.js', '.sjs']
+        });
         return expandModule(fs.readFileSync(filename, "utf8"), undefined, {
             filename: moduleName,
             requireModule: options.requireModule || requireModule
