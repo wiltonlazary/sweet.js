@@ -2,7 +2,7 @@
   "name": "sweet.js",
   "description": "Hygienic Macros for JavaScript",
   "main": "lib/sweet.js",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "engines": {
     "node": ">=0.4.0"
   },
@@ -14,7 +14,7 @@
     }
   ],
   "scripts": {
-    "test": "node --harmony ./node_modules/.bin/grunt full"
+    "test": "node --harmony ./node_modules/.bin/grunt full --stack"
   },
   "directories": {
     "test": "test"
@@ -36,7 +36,8 @@
     "grunt-cli": "0.1.x",
     "grunt-contrib-copy": "~0.4.1",
     "grunt-contrib-jshint": "~0.7.2",
-    "grunt-mocha-test": "~0.7.0"
+    "grunt-mocha-test": "~0.7.0",
+    "grunt-contrib-watch": "~0.6.1"
   },
   "repository": {
     "type": "git",

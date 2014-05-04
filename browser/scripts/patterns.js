@@ -181,7 +181,7 @@
             'ident',
             'token',
             'invoke',
-            'invokeOnce'
+            'invokeRec'
         ].indexOf(name) > -1;
     }
     function loadPattern(patterns, reverse) {
@@ -211,7 +211,7 @@
                     i += 2;
                     if (isPrimaryClass(tok3.token.value)) {
                         patt.class = tok3.token.value;
-                        if (patt.class === 'invokeOnce' || patt.class === 'invoke') {
+                        if (patt.class === 'invokeRec' || patt.class === 'invoke') {
                             i += 1;
                             if (tok4.token.value === '()' && tok4.token.inner.length) {
                                 patt.macroName = tok4.expose().token.inner;
@@ -329,7 +329,7 @@
             rest = stx.slice(1);
         } else if (stx.length > 0 && patternObj.class === 'VariableStatement') {
             match = stx[0].term ? cachedTermMatch(stx, stx[0].term) : expander.enforest(stx, expander.makeExpanderContext({ env: env }));
-            if (match.result && match.result.hasPrototype(expander.VariableStatement)) {
+            if (match.result && match.result.isVariableStatement) {
                 result = match.destructed || match.result.destruct(false);
                 rest = match.rest;
             } else {
@@ -337,16 +337,17 @@
                 rest = stx;
             }
         } else if (stx.length > 0 && patternObj.class === 'expr') {
-            match = stx[0].term ? cachedTermMatch(stx, stx[0].term) : expander.get_expression(stx, expander.makeExpanderContext({ env: env }));
-            if (match.result === null || !match.result.hasPrototype(expander.Expr)) {
+            match = expander.get_expression(stx, expander.makeExpanderContext({ env: env }));
+            if (match.result === null || !match.result.isExpr) {
                 result = null;
                 rest = stx;
             } else {
                 result = match.destructed || match.result.destruct(false);
+                result = [syntax.makeDelim('()', result, result[0])];
                 rest = match.rest;
             }
-        } else if (stx.length > 0 && (patternObj.class === 'invoke' || patternObj.class === 'invokeOnce')) {
-            match = expandWithMacro(patternObj.macroName, stx, env, patternObj.class === 'invoke');
+        } else if (stx.length > 0 && (patternObj.class === 'invoke' || patternObj.class === 'invokeRec')) {
+            match = expandWithMacro(patternObj.macroName, stx, env, patternObj.class === 'invokeRec');
             result = match.result;
             rest = match.result ? match.rest : stx;
             patternEnv = match.patternEnv;
@@ -398,7 +399,7 @@
                         var restMatch = matchPatterns(patterns.slice(i + 1), rest, env, topLevel);
                         if (restMatch.success) {
                             // match the repeat pattern on the empty array to fill in its
-                            // pattern variable in the environment 
+                            // pattern variable in the environment
                             match = matchPattern(pattern, [], env, patternEnv, topLevel);
                             patternEnv = _.extend(restMatch.patternEnv, match.patternEnv);
                             rest = restMatch.rest;
@@ -625,7 +626,7 @@
             patternEnv = match.patternEnv;
             if (success) {
                 if (match.rest.length) {
-                    if (last && last.term === match.rest[0].term) {
+                    if (last && last.term && last.term === match.rest[0].term) {
                         // The term tree was split, so its a failed match;
                         success = false;
                     } else {
@@ -638,6 +639,7 @@
                                 break;
                             }
                         }
+                        assert(prevTerms, 'No matching previous term found');
                     }
                 } else {
                     prevTerms = [];
@@ -743,7 +745,7 @@
                                 // copy scalars over
                                 renv[pat] = env[pat];
                             } else {
-                                // grab the match at this index 
+                                // grab the match at this index
                                 renv[pat] = env[pat].match[idx$2];
                             }
                         });
@@ -831,7 +833,7 @@
                     if (tok2 && tok2.token.type === parser.Token.Punctuator && tok2.token.value === ':' && tok3 && tok3.token.type === parser.Token.Identifier) {
                         pat.push(tok2, tok3);
                         i += 2;
-                        if (tok3.token.value === 'invoke' || tok3.token.value === 'invokeOnce' && tok4) {
+                        if (tok3.token.value === 'invoke' || tok3.token.value === 'invokeRec' && tok4) {
                             pat.push(tok4);
                             i += 1;
                         }

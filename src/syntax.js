@@ -14,6 +14,13 @@
         }
     }
 
+    // Keep an incrementing global counter so that a particular
+    // each new context object is assigned a unique "instance number"
+    // that it can be identified by. This helps with the memoization
+    // of the recursive resolveCtx implementation in expander.js.
+    // The memoization addresses issue #232.
+    var globalContextInstanceNumber = 1;
+
     // (CSyntax, Str) -> CContext
     function Rename(id, name, ctx, defctx) {
         defctx = defctx || null;
@@ -22,19 +29,22 @@
         this.name = name;
         this.context = ctx;
         this.def = defctx;
+        this.instNum = globalContextInstanceNumber++;
     }
-    
+
     // (Num) -> CContext
     function Mark(mark, ctx) {
         this.mark = mark;
         this.context = ctx;
+        this.instNum = globalContextInstanceNumber++;
     }
 
     function Def(defctx, ctx) {
         this.defctx = defctx;
         this.context = ctx;
+        this.instNum = globalContextInstanceNumber++;
     }
-    
+
     function Syntax(token, oldstx) {
         this.token = token;
         this.context = (oldstx && oldstx.context) ? oldstx.context : null;
@@ -57,18 +67,18 @@
         rename: function(id, name, defctx) {
             // defer renaming of delimiters
             if (this.token.inner) {
-                return syntaxFromToken(this.token, 
+                return syntaxFromToken(this.token,
                                        {deferredContext: new Rename(id, name, this.deferredContext, defctx),
                                         context: new Rename(id, name, this.context, defctx)});
             }
 
-            return syntaxFromToken(this.token, 
+            return syntaxFromToken(this.token,
                                    {context: new Rename(id, name, this.context, defctx)});
         },
 
         addDefCtx: function(defctx) {
             if (this.token.inner) {
-                return syntaxFromToken(this.token, 
+                return syntaxFromToken(this.token,
                                        {deferredContext: new Def(defctx, this.deferredContext),
                                         context: new Def(defctx, this.context)});
             }
@@ -107,16 +117,19 @@
                 }
             }
 
-            this.token.inner = _.map(this.token.inner, _.bind(function(stx) {
+            var self = this;
+            this.token.inner = _.map(this.token.inner, function(stx) {
+                // when not a syntax object (aka a TermTree) then no need to push down the expose
+                if (!stx.token) { return stx; }
                 if (stx.token.inner) {
-                    return syntaxFromToken(stx.token, 
-                                           {deferredContext: applyContext(stx.deferredContext, this.deferredContext),
-                                            context: applyContext(stx.context, this.deferredContext)});
+                    return syntaxFromToken(stx.token,
+                                           {deferredContext: applyContext(stx.deferredContext, self.deferredContext),
+                                            context: applyContext(stx.context, self.deferredContext)});
                 } else {
                     return syntaxFromToken(stx.token,
-                                           {context: applyContext(stx.context, this.deferredContext)});
+                                           {context: applyContext(stx.context, self.deferredContext)});
                 }
-            }, this));
+            });
             this.deferredContext = null;
             return this;
         },
@@ -184,7 +197,7 @@
                 lineStart = stx.token.lineStart;
                 lineNumber = stx.token.lineNumber;
                 range = stx.token.range;
-            } 
+            }
 
             return syntaxFromToken({
                 type: type,
@@ -196,7 +209,7 @@
         }
 
     }
-    
+
 
     function makeValue(val, stx) {
         if(typeof val === 'boolean') {
@@ -243,10 +256,10 @@
 
     function unwrapSyntax(stx) {
         if (Array.isArray(stx) && stx.length === 1) {
-            // pull stx out of single element arrays for convenience 
+            // pull stx out of single element arrays for convenience
             stx = stx[0];
         }
-        
+
         if (stx.token) {
             if(stx.token.type === parser.Token.Delimiter) {
                 return stx.token;
@@ -355,12 +368,12 @@
         var ch;
 
         while ((ch = code.charAt(lineStart++))) {
-            if (ch == '\r' || ch == '\n') { 
+            if (ch == '\r' || ch == '\n') {
                 break;
             }
             line += ch;
         }
-        
+
         return '[' + err.name + '] ' + err.message + '\n' +
                pre + line + '\n' +
                (Array(offset + pre.length).join(' ')) + ' ^';
