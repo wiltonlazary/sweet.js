@@ -2,7 +2,7 @@
   "name": "sweet.js",
   "description": "Hygienic Macros for JavaScript",
   "main": "lib/sweet.js",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "engines": {
     "node": ">=0.4.0"
   },
@@ -37,7 +37,8 @@
     "grunt-contrib-copy": "~0.4.1",
     "grunt-contrib-jshint": "~0.7.2",
     "grunt-mocha-test": "~0.7.0",
-    "grunt-contrib-watch": "~0.6.1"
+    "grunt-contrib-watch": "~0.6.1",
+    "esfuzz": "disnet/esfuzz"
   },
   "repository": {
     "type": "git",

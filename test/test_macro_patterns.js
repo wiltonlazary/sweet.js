@@ -744,7 +744,18 @@ describe("macro expander", function() {
         }
 
         expect(:= 100).to.be(100);
-    })
+    });
+
+    it("should work with nested multi token macro names", function() {
+        let (->) = macro {
+            rule infix { $arg:ident | $body:expr } => {
+                function($arg) { return $body }
+            }
+        }
+
+        var fn = x -> [y -> x + y];
+        expect(fn(1)[0](3)).to.be(4);
+    });
 
     it("should allow macros to override binary operators", function() {
         macro + {
@@ -1026,10 +1037,77 @@ describe("macro expander", function() {
         expect(m([1, 2, 3])).to.eql([1, 2, 3, 1, 2, 3]);
     });
 
+    it("should allow repeated pattern groups to match zero or more", function() {
+        macro m {
+            rule { $($val) ... } => {
+                42 $val ...
+            }
+        }
+        expect(m).to.be(42);
+    })
+
+    it("should allow repeated delimiters to match zero or more", function() {
+        macro m {
+            rule { [$val] ... } => {
+                42 $val ...
+            }
+        }
+        expect(m).to.be(42);
+    });
+
+    it("should allow repeated parens to match zero or more", function() {
+        macro m {
+            rule { ($val) ... } => {
+                42 $val ...
+            }
+        }
+        expect(m).to.be(42);
+    });
+
+    it("should allow repeated delimiters match at least one", function() {
+        macro m {
+            rule { [$faz] ... }  => {
+                [$faz (,) ...]   
+            }
+        }
+
+        expect(m [1]).to.eql([1]);
+    })
+
+    it("should allow named pattern groups", function() {
+        macro m {
+            rule { $x:(1 + 2) } => { $x - 3 }
+        }
+        expect(m 1 + 2).to.be(0);
+    });
+
+    it("should allow named pattern groups with sub-bindings", function() {
+        macro m {
+            rule { $x:(1 + $y) } => { $x$y - 3 }
+        }
+        expect(m 1 + 2).to.be(-1);
+    });
+
+    it("should allow nested named pattern groups", function() {
+        macro m {
+            rule { $x:($y:($z) ...) } => { $x$y$z (-) ... }
+        }
+        expect(m 3 2 1).to.be(0);
+    });
+
+    it("should allow named escape groups", function() {
+        var $ = [42];
+        macro m {
+            rule { $x:[$[0]] } => { $x }
+        }
+        expect(m $[0]).to.be(42);
+    });
+
     it("should allow expansion on the left side of an object get", function () {
         macro m { rule { $x } => { $x } }
         expect((m [100])[0]).to.be(100);
     });
+
     it("should allow expansion in a ternary expression", function () {
         macro m { rule { $x } => { $x } }
         var x = 42;
@@ -1038,5 +1116,18 @@ describe("macro expander", function() {
         expect(false ? (m x) : (m y)).to.be(y);
         expect((m (1==1)) ? (m x) : (m y)).to.be(x);
         expect((m (1!=1)) ? (m x) : (m y)).to.be(y);
+    });
+
+    it("should allow transcription of empty higher-level repeaters", function() {
+        function a(){ return 1; }
+        function b(){ return 2; }
+        macro m {
+            rule { ($($name ($args (,) ...)) (,) ...) } => {
+                [$($name($args (,) ...)) (,) ...];
+            }
+        }
+        var res = m(a(1, 2), b());
+        expect(res[0]).to.be(1);
+        expect(res[1]).to.be(2);
     });
 });

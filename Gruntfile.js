@@ -1,6 +1,7 @@
 module.exports = function(grunt) {
     var path = require("path");
     var exec = require("child_process").exec;
+    var esfuzz= require("esfuzz");
 
     grunt.loadNpmTasks('grunt-contrib-copy');
     grunt.loadNpmTasks('grunt-contrib-jshint');
@@ -169,7 +170,25 @@ module.exports = function(grunt) {
                 exec("pandoc " + args.join(" "), cb);
             })
         })
-    })
+    });
+
+    grunt.registerTask("fuzz", function() {
+        var sweet = require("./build/lib/sweet");
+        var i, iterations = 20;
+        try {
+            for (i = 0; i < iterations; i++) {
+                var code = esfuzz.render(esfuzz.generate({maxDepth: 10}))
+                // ignore `with` since we can't handle it anyway
+                if (code.indexOf("with") !== -1) continue;
+                sweet.compile(code);
+            }
+            console.log("done fuzzing");
+        } catch (e) {
+            console.log("On loop " + i + " attempted to expand:");
+            console.log(code);
+            console.log("\n" + e);
+        }
+    });
 
 
     grunt.registerMultiTask("build", function() {

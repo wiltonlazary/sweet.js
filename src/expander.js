@@ -497,13 +497,13 @@
     dataclass ObjDotGet             (left, dot, right)                  extends Expr;
     dataclass ObjGet                (left, right)                       extends Expr;
     dataclass Template              (template)                          extends Expr;
+    dataclass Call                  (fun, args)                         extends Expr;
 
     dataclass PrimaryExpression     ()                                  extends Expr;
     dataclass ThisExpression        (keyword)                           extends PrimaryExpression;
     dataclass Lit                   (lit)                               extends PrimaryExpression;
     dataclass Block                 (body)                              extends PrimaryExpression;
     dataclass ArrayLiteral          (array)                             extends PrimaryExpression;
-    dataclass ParenExpression       (expr)                              extends PrimaryExpression;
     dataclass Id                    (id)                                extends PrimaryExpression;
 
     dataclass Partial               ()                                  extends TermTree;
@@ -525,16 +525,14 @@
     dataclass LetStatement      (keyword, decls) extends BindingStatement;
     dataclass ConstStatement    (keyword, decls) extends BindingStatement;
 
-    dataclass Call(fun, args, delim, commas) extends Expr {
+    dataclass ParenExpression(args, delim, commas) extends PrimaryExpression {
         destruct() {
-            assert(this.fun.isTermTree,
-                "expecting a term tree in destruct of call");
             var commas = this.commas.slice();
             cloned newtok <- this.delim.token;
             var delim = syntaxFromToken(newtok, this.delim);
             delim.token.inner = _.reduce(this.args, function(acc, term) {
                 assert(term && term.isTermTree,
-                       "expecting term trees in destruct of Call");
+                       "expecting term trees in destruct of ParenExpression");
                 push.apply(acc, term.destruct());
                 // add all commas except for the last one
                 if (commas.length > 0) {
@@ -542,9 +540,7 @@
                 }
                 return acc;
             }, []);
-            var res = this.fun.destruct();
-            push.apply(res, Delimiter.create(delim).destruct());
-            return res;
+            return Delimiter.create(delim).destruct();
         }
     }
 
@@ -666,7 +662,7 @@
                     if (rhs.result == null) {
                         throwSyntaxError("enforest", "Unexpected token", rhs.rest[0]);
                     }
-                    if (rhs.rest[0].token.type === parser.Token.Punctuator &&
+                    if (rhs.rest[0] && rhs.rest[0].token.type === parser.Token.Punctuator &&
                         rhs.rest[0].token.value === ",") {
                         decls.push(VariableDeclaration.create(rest[0], rest[1], rhs.result, rhs.rest[0]));
                         rest = rhs.rest.slice(1);
@@ -728,6 +724,31 @@
         } else {
             return opRes;
         }
+    }
+
+    function enforestParenExpression(parens, context) {
+        var argRes, enforestedArgs = [], commas = [];
+        var innerTokens = parens.expose().token.inner;
+        while (innerTokens.length > 0) {
+            argRes = enforest(innerTokens, context);
+            if (!argRes.result || !argRes.result.isExpr) {
+                return null;
+            }
+            enforestedArgs.push(argRes.result);
+            innerTokens = argRes.rest;
+            if (innerTokens[0] && innerTokens[0].token.value === ",") {
+                // record the comma for later
+                commas.push(innerTokens[0]);
+                // but dump it for the next loop turn
+                innerTokens = innerTokens.slice(1);
+            } else {
+                // either there are no more tokens or
+                // they aren't a comma, either way we
+                // are done with the loop
+                break;
+            }
+        }
+        return innerTokens.length ? null : ParenExpression.create(enforestedArgs, parens, commas);
     }
 
     function adjustLineContext(stx, original, current) {
@@ -847,7 +868,9 @@
                 (next.token.type === parser.Token.Punctuator ||
                  next.token.type === parser.Token.Identifier ||
                  next.token.type === parser.Token.Keyword) &&
-                curr.token.range[1] === next.token.range[0]) {
+                 (curr.token.sm_range && next.token.sm_range &&
+                  curr.token.sm_range[1] === next.token.sm_range[0] ||
+                  curr.token.range[1] === next.token.range[0])) {
                 name.push(next);
                 curr = next;
                 next = rest[++idx];
@@ -1146,20 +1169,20 @@
                                     assert(newt.rest.length === 0, "should never have left over syntax");
                                     return {
                                         term: newt.result,
-                                        prevStx: opCtx.prevStx,
-                                        prevTerms: opCtx.prevTerms
+                                        prevStx: opPrevStx,
+                                        prevTerms: opPrevTerms
                                     };
                                 }
                                 return {
                                     term: BinOp.create(left, op, right),
-                                    prevStx: opCtx.prevStx,
-                                    prevTerms: opCtx.prevTerms
+                                    prevStx: opPrevStx,
+                                    prevTerms: opPrevTerms
                                 };
                             } else {
                                 return {
                                     term: head,
-                                    prevStx: opCtx.prevStx,
-                                    prevTerms: opCtx.prevTerms
+                                    prevStx: opPrevStx,
+                                    prevTerms: opPrevTerms
                                 };
                             }
                         },
@@ -1174,39 +1197,10 @@
                 } else if (head.isExpr && (rest[0] &&
                              rest[0].token.type === parser.Token.Delimiter &&
                              rest[0].token.value === "()")) {
-                    var argRes, enforestedArgs = [], commas = [];
-                    rest[0].expose();
-                    innerTokens = rest[0].token.inner;
-                    while (innerTokens.length > 0) {
-                        argRes = enforest(innerTokens, context);
-                        if(!argRes.result) {
-                            break;
-                        }
-                        enforestedArgs.push(argRes.result);
-                        innerTokens = argRes.rest;
-                        if (innerTokens[0] && innerTokens[0].token.value === ",") {
-                            // record the comma for later
-                            commas.push(innerTokens[0]);
-                            // but dump it for the next loop turn
-                            innerTokens = innerTokens.slice(1);
-                        } else {
-                            // either there are no more tokens or
-                            // they aren't a comma, either way we
-                            // are done with the loop
-                            break;
-                        }
-                    }
-                    var argsAreExprs = _.all(enforestedArgs, function(argTerm) {
-                        return argTerm.isExpr;
-                    });
 
-                    // only a call if we can completely enforest each argument and
-                    // each argument is an expression
-                    if (innerTokens.length === 0 && argsAreExprs) {
-                        return step(Call.create(head,
-                                                enforestedArgs,
-                                                rest[0],
-                                                commas),
+                    var parenRes = enforestParenExpression(rest[0], context);
+                    if (parenRes) {
+                        return step(Call.create(head, parenRes),
                                     rest.slice(1),
                                     opCtx);
                     }
@@ -1272,22 +1266,18 @@
                 // ParenExpr
                 } else if (head.isDelimiter &&
                            head.delim.token.value === "()") {
-                    innerTokens = head.delim.expose().token.inner;
                     // empty parens are acceptable but enforest
                     // doesn't accept empty arrays so short
                     // circuit here
-                    if (innerTokens.length === 0) {
-                        head.delim.token.inner = [Empty.create()];
-                        return step(ParenExpression.create(head), rest, opCtx);
+                    if (head.delim.token.inner.length === 0) {
+                        return step(ParenExpression.create([Empty.create()], head.delim.expose(), []),
+                                   rest,
+                                   opCtx);
                     } else {
-                        var innerTerm = get_expression(innerTokens, context);
-                        if (innerTerm.result && innerTerm.result.isExpr &&
-                            innerTerm.rest.length === 0) {
-                            head.delim.token.inner = [innerTerm.result];
-                            return step(ParenExpression.create(head), rest, opCtx);
+                        var parenRes = enforestParenExpression(head.delim, context);
+                        if (parenRes) {
+                            return step(parenRes, rest, opCtx);
                         }
-                        // if the tokens inside the paren aren't an expression
-                        // we just leave it as a delimiter
                     }
                 // AssignmentExpression
                 } else if (head.isExpr &&
@@ -1645,6 +1635,10 @@
                                         rest[0].token.type === parser.Token.Punctuator ||
                                         rest[0].token.type === parser.Token.Delimiter &&
                                         rest[0].token.value === "()")) {
+                    // Consume optional semicolon                      
+                    if (unwrapSyntax(rest[1]) === ";") {
+                        rest.splice(1, 1);
+                    }
                     return step(Export.create(rest[0]), rest.slice(1), opCtx);
                 // identifier
                 } else if (head.token.type === parser.Token.Identifier) {
@@ -1675,8 +1669,9 @@
             }
 
             // Potentially an infix macro
-            if (head.isExpr && rest.length &&
-                nameInEnv(rest[0], rest.slice(1), context.env)) {
+            // This should only be invoked on runtime syntax terms
+            if (!head.isMacro && !head.isLetMacro && !head.isAnonMacro && !head.isOperatorDefinition &&
+                rest.length && nameInEnv(rest[0], rest.slice(1), context.env)) {
                 var infLeftTerm = opCtx.prevTerms[0] && opCtx.prevTerms[0].isPartial
                                   ? opCtx.prevTerms[0]
                                   : null;
@@ -2002,7 +1997,7 @@
                 macroDefinition = loadMacroDef(head.body, context);
                 var name = head.name.map(unwrapSyntax).join("");
                 var nameStx = syn.makeIdent(name, head.name[0]);
-                addToDefinitionCtx([nameStx], context.defscope, false);
+                addToDefinitionCtx([nameStx], context.defscope, false, context.paramscope);
                 context.env.names.set(name, true);
                 context.env.set(resolve(nameStx), {
                     fn: macroDefinition,
@@ -2041,7 +2036,7 @@
 
                 var name = head.name.map(unwrapSyntax).join("");
                 var nameStx = syn.makeIdent(name, head.name[0]);
-                addToDefinitionCtx([nameStx], context.defscope, false);
+                addToDefinitionCtx([nameStx], context.defscope, false, context.paramscope);
                 var resolvedName = resolve(nameStx);
                 var opObj = context.env.get(resolvedName);
                 if (!opObj) {
@@ -2071,7 +2066,7 @@
             prevStx = destructed.reverse().concat(f.prevStx);
 
             if (head.isNamedFun) {
-                addToDefinitionCtx([head.name], context.defscope, true);
+                addToDefinitionCtx([head.name], context.defscope, true, context.paramscope);
             }
 
             if (head.isVariableStatement ||
@@ -2079,7 +2074,8 @@
                 head.isConstStatement) {
                 addToDefinitionCtx(_.map(head.decls, function(decl) { return decl.ident; }),
                                    context.defscope,
-                                   true)
+                                   true,
+                                   context.paramscope);
             }
 
             if(head.isBlock && head.body.isDelimiter) {
@@ -2087,7 +2083,8 @@
                     if (term.isVariableStatement) {
                         addToDefinitionCtx(_.map(term.decls, function(decl)  { return decl.ident; }),
                                            context.defscope,
-                                           true);
+                                           true,
+                                           context.paramscope);
                     }
                 });
 
@@ -2098,7 +2095,8 @@
                     if (term.isVariableStatement) {
                         addToDefinitionCtx(_.map(term.decls, function(decl) { return decl.ident; }),
                                            context.defscope,
-                                           true);
+                                           true,
+                                           context.paramscope);
 
                     }
                 });
@@ -2151,37 +2149,53 @@
         };
     }
 
-    function addToDefinitionCtx(idents, defscope, skipRep) {
+    function addToDefinitionCtx(idents, defscope, skipRep, paramscope) {
         assert(idents && idents.length > 0, "expecting some variable identifiers");
+        // flag for skipping repeats since we reuse this function to place both
+        // variables declarations (which need to skip redeclarations) and
+        // macro definitions which don't
         skipRep = skipRep || false;
-        _.each(idents, function(id) {
-            var skip = false;
-            if (skipRep) {
-                var declRepeat = _.find(defscope, function(def) {
-                    return def.id.token.value === id.token.value &&
-                        arraysEqual(marksof(def.id.context), marksof(id.context));
-                });
-                skip = typeof declRepeat !== 'undefined';
-            }
-            /*
-               When var declarations repeat in the same function scope:
+        _.chain(idents)
+            .filter(function(id) {
+                if (skipRep) {
+                    /*
+                       When var declarations repeat in the same function scope:
 
-               var x = 24;
-               ...
-               var x = 42;
+                       var x = 24;
+                       ...
+                       var x = 42;
 
-               we just need to use the first renaming and leave the
-               definition context as is.
-            */
-            if (!skip) {
+                       we just need to use the first renaming and leave the
+                       definition context as is.
+                    */
+                    var varDeclRep = _.find(defscope, function(def) {
+                        return def.id.token.value === id.token.value &&
+                            arraysEqual(marksof(def.id.context), marksof(id.context));
+                    });
+                    /* 
+                        When var declaration repeat one of the function parameters:
+
+                        function foo(x) {
+                            var x;
+                        }
+
+                        we don't need to add the var to the definition context.
+                    */
+                    var paramDeclRep = _.find(paramscope, function(param) {
+                        return param.token.value === id.token.value &&
+                            arraysEqual(marksof(param.context), marksof(id.context));
+                    });
+                    return (typeof varDeclRep === 'undefined') && 
+                           (typeof paramDeclRep === 'undefined');
+                }
+                return true;
+            }).each(function(id) {
                 var name = fresh();
                 defscope.push({
                     id: id,
                     name: name
                 });
-
-            }
-        });
+            });
     }
 
 
@@ -2198,14 +2212,13 @@
             term.body.delim.token.inner = expand(term.body.delim.expose().token.inner, context);
             return term;
         } else if (term.isParenExpression) {
-            assert(term.expr.delim.token.inner.length === 1, "Paren expressions always have a single term inside the delimiter");
-            term.expr.delim.token.inner = [expandTermTreeToFinal(term.expr.delim.token.inner[0], context)];
-            return term;
-        } else if (term.isCall) {
-            term.fun = expandTermTreeToFinal(term.fun, context);
             term.args = _.map(term.args, function(arg) {
                 return expandTermTreeToFinal(arg, context);
             });
+            return term;
+        } else if (term.isCall) {
+            term.fun = expandTermTreeToFinal(term.fun, context);
+            term.args = expandTermTreeToFinal(term.args, context);
             return term;
         } else if (term.isReturnStatement) {
             term.expr = expandTermTreeToFinal(term.expr, context);
@@ -2252,7 +2265,6 @@
             // function definitions need a bunch of hygiene logic
             // push down a fresh definition context
             var newDef = [];
-            var bodyContext = makeExpanderContext(_.defaults({defscope: newDef}, context));
 
             var paramSingleIdent = term.params && term.params.token.type === parser.Token.Identifier;
 
@@ -2280,6 +2292,14 @@
                     renamedParam: param.rename(param, freshName)
                 };
             });
+
+            var bodyContext = makeExpanderContext(_.defaults({
+                defscope: newDef, 
+                // paramscope is used to filter out var redeclarations
+                paramscope: paramNames.map(function(p) {
+                    return p.renamedParam;
+                })
+            }, context));
 
 
             // rename the function body for each of the parameters
@@ -2398,6 +2418,8 @@
                   writable: false, enumerable: true, configurable: false},
             defscope: {value: o.defscope,
                        writable: false, enumerable: true, configurable: false},
+            paramscope: {value: o.paramscope,
+                         writable: false, enumerable: true, configurable: false},
             templateMap: {value: o.templateMap || new StringMap(),
                           writable: false, enumerable: true, configurable: false},
             patternMap: {value: o.patternMap || new StringMap(),

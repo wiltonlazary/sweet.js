@@ -13,6 +13,8 @@
     var get_expression = expander.get_expression;
     var syntaxFromToken = syntax.syntaxFromToken;
     var makePunc = syntax.makePunc;
+    var makeIdent = syntax.makeIdent;
+    var makeDelim = syntax.makeDelim;
     var joinSyntax = syntax.joinSyntax;
     var joinSyntaxArray = syntax.joinSyntaxArray;
     var cloneSyntaxArray = syntax.cloneSyntaxArray;
@@ -186,8 +188,8 @@
         var len = patterns.length;
         var pat;
         return _.reduceRight(patterns, function(acc, pat) {
-            if (pat.class === "pattern_group") {
-                pat.token.inner = reversePattern(pat.token.inner);
+            if (pat.class === "pattern_group" || pat.class === "named_group") {
+                pat.inner = reversePattern(pat.inner);
             }
             if (pat.repeat) {
                 pat.leading = !pat.leading;
@@ -198,14 +200,26 @@
     }
 
     function loadLiteralGroup(patterns) {
-        _.forEach(patterns, function(patStx) {
-            if (patStx.token.type === parser.Token.Delimiter) {
-                patStx.token.inner = loadLiteralGroup(patStx.token.inner);
+        return patterns.map(function(patStx) {
+            var pat = patternToObject(patStx);
+            if (pat.inner) {
+                pat.inner = loadLiteralGroup(pat.inner);
             } else {
-                patStx.class = "pattern_literal";
+                pat.class = "pattern_literal";
             }
+            return pat;
         });
-        return patterns;
+    }
+
+    function patternToObject(pat) {
+        var obj = {
+            type: pat.token.type,
+            value: pat.token.value
+        };
+        if (pat.token.inner) {
+            obj.inner = pat.token.inner;
+        }
+        return obj;
     }
 
     function isPrimaryClass(name) {
@@ -246,14 +260,23 @@
                 continue;
 
             } else if (isPatternVar(tok1)) {
-                patt = tok1;
+                patt = patternToObject(tok1);
 
                 if (tok2 && tok2.token.type === parser.Token.Punctuator &&
                     tok2.token.value === ":" &&
-                    tok3 && tok3.token.type === parser.Token.Identifier) {
+                    tok3 && (tok3.token.type === parser.Token.Identifier ||
+                             tok3.token.type === parser.Token.Delimiter &&
+                             (tok3.token.value === '[]' ||
+                              tok3.token.value === '()'))) {
 
                     i += 2;
-                    if (isPrimaryClass(tok3.token.value)) {
+                    if (tok3.token.value === '[]') {
+                        patt.class = "named_group";
+                        patt.inner = loadLiteralGroup(tok3.expose().token.inner);
+                    } else if (tok3.token.value === '()') {
+                        patt.class = "named_group";
+                        patt.inner = loadPattern(tok3.expose().token.inner);
+                    } else if (isPrimaryClass(tok3.token.value)) {
                         patt.class = tok3.token.value;
                         if (patt.class === "invokeRec" || patt.class === "invoke") {
                             i += 1;
@@ -274,24 +297,24 @@
                        tok1.token.value === "$" &&
                        tok2.token.type === parser.Token.Delimiter) {
                 i += 1;
-                patt = tok2;
+                patt = patternToObject(tok2);
                 patt.class = "pattern_group";
 
-                if (patt.token.value === "[]") {
-                    patt.token.inner = loadLiteralGroup(patt.token.inner);
+                if (patt.value === "[]") {
+                    patt.inner = loadLiteralGroup(patt.inner);
                 } else {
-                    patt.token.inner = loadPattern(patt.expose().token.inner);
+                    patt.inner = loadPattern(tok2.expose().token.inner);
                 }
             } else if (tok1.token.type === parser.Token.Identifier &&
                        tok1.token.value === "_") {
-                patt = tok1;
+                patt = patternToObject(tok1);
                 patt.class = "wildcard";
             } else {
-                patt = tok1;
+                patt = patternToObject(tok1);
                 patt.class = "pattern_literal";
 
-                if (patt.token.inner) {
-                    patt.token.inner = loadPattern(patt.expose().token.inner);
+                if (patt.inner) {
+                    patt.inner = loadPattern(tok1.expose().token.inner);
                 }
             }
 
@@ -322,11 +345,11 @@
         };
     }
 
-    function expandWithMacro(macroName, stx, env, rec) {
+    function expandWithMacro(macroName, stx, context, rec) {
         var name = macroName.map(syntax.unwrapSyntax).join("");
         var ident = syntax.makeIdent(name, macroName[0]);
-        var macroObj = env.get(expander.resolve(ident));
-        var newContext = expander.makeExpanderContext({env: env});
+        var macroObj = context.env.get(expander.resolve(ident));
+        var newContext = expander.makeExpanderContext(context);
 
         if (!macroObj) {
             throwSyntaxError("invoke", "Macro not in scope", macroName[0]);
@@ -355,7 +378,7 @@
                 var resultHead = result[0];
                 var resultRest = result.slice(1);
                 var nextName = expander.getName(resultHead, resultRest);
-                var nextMacro = expander.getMacroInEnv(resultHead, resultRest, env);
+                var nextMacro = expander.getMacroInEnv(resultHead, resultRest, context.env);
 
                 if (nextName && nextMacro) {
                     macroObj = nextMacro;
@@ -377,7 +400,7 @@
 
 
     // (Pattern, [...CSyntax], MacroEnv) -> {result: null or [...CSyntax], rest: [...CSyntax]}
-    function matchPatternClass (patternObj, stx, env) {
+    function matchPatternClass (patternObj, stx, context) {
         var result, rest, match, patternEnv;
         // pattern has no parse class
         if (patternObj.class === "token" &&
@@ -395,7 +418,7 @@
         } else if (stx.length > 0 && patternObj.class === "VariableStatement") {
             match = stx[0].term
                 ? cachedTermMatch(stx, stx[0].term)
-                : expander.enforest(stx, expander.makeExpanderContext({env: env}));
+                : expander.enforest(stx, expander.makeExpanderContext(context));
             if (match.result && match.result.isVariableStatement) {
                 result = match.destructed || match.result.destruct(false);
                 rest = match.rest;
@@ -404,7 +427,7 @@
                 rest = stx;
             }
         } else if (stx.length > 0 && patternObj.class === "expr") {
-            match = expander.get_expression(stx, expander.makeExpanderContext({env: env}));
+            match = expander.get_expression(stx, expander.makeExpanderContext(context));
             if (match.result === null || !match.result.isExpr) {
                 result = null;
                 rest = stx;
@@ -415,7 +438,7 @@
             }
         } else if (stx.length > 0 && (patternObj.class === "invoke" ||
                                       patternObj.class === "invokeRec")) {
-            match = expandWithMacro(patternObj.macroName, stx, env,
+            match = expandWithMacro(patternObj.macroName, stx, context,
                                     patternObj.class === "invokeRec");
             result = match.result;
             rest = match.result ? match.rest : stx;
@@ -435,7 +458,7 @@
 
     // attempt to match patterns against stx
     // ([...Pattern], [...Syntax], Env) -> { result: [...Syntax], rest: [...Syntax], patternEnv: PatternEnv }
-    function matchPatterns(patterns, stx, env, topLevel) {
+    function matchPatterns(patterns, stx, context, topLevel) {
         // topLevel lets us know if the patterns are on the top level or nested inside
         // a delimiter:
         //     case $topLevel (,) ... => { }
@@ -470,11 +493,11 @@
             do {
                 // handles cases where patterns trail a repeated pattern like `$x ... ;`
                 if (pattern.repeat && i + 1 < patterns.length) {
-                    var restMatch = matchPatterns(patterns.slice(i+1), rest, env, topLevel);
+                    var restMatch = matchPatterns(patterns.slice(i+1), rest, context, topLevel);
                     if (restMatch.success) {
                         // match the repeat pattern on the empty array to fill in its
                         // pattern variable in the environment
-                        match = matchPattern(pattern, [], env, patternEnv, topLevel);
+                        match = matchPattern(pattern, [], context, patternEnv, topLevel);
                         patternEnv = _.extend(restMatch.patternEnv, match.patternEnv);
                         rest = restMatch.rest;
                         break patternLoop;
@@ -494,7 +517,7 @@
                         }
                     }
                 }
-                match = matchPattern(pattern, rest, env, patternEnv, topLevel);
+                match = matchPattern(pattern, rest, context, patternEnv, topLevel);
                 if (!match.success && pattern.repeat) {
                     // a repeat can match zero tokens and still be a
                     // "success" so break out of the inner loop and
@@ -598,7 +621,7 @@
         "$y" : ...
     }
     */
-    function matchPattern(pattern, stx, env, patternEnv, topLevel) {
+    function matchPattern(pattern, stx, context, patternEnv, topLevel) {
         var subMatch;
         var match, matchEnv;
         var rest;
@@ -607,8 +630,26 @@
         if (typeof pattern.inner !== 'undefined') {
             if (pattern.class === "pattern_group") {
                 // pattern groups don't match the delimiters
-                subMatch = matchPatterns(pattern.inner, stx, env, true);
+                subMatch = matchPatterns(pattern.inner, stx, context, true);
                 rest = subMatch.rest;
+                success = subMatch.success;
+            } else if (pattern.class === "named_group") {
+                subMatch = matchPatterns(pattern.inner, stx, context, true);
+                rest = subMatch.rest;
+                success = subMatch.success;
+                if (success) {
+                    var namedMatch = {};
+                    namedMatch[pattern.value] = {
+                        level: 0,
+                        match: subMatch.result,
+                        topLevel: topLevel
+                    };
+                    subMatch.patternEnv = loadPatternEnv(namedMatch,
+                                                         subMatch.patternEnv,
+                                                         topLevel,
+                                                         false,
+                                                         pattern.value);
+                }
             } else if (stx[0] && stx[0].token.type === parser.Token.Delimiter &&
                        stx[0].token.value === pattern.value) {
                 stx[0].expose();
@@ -621,22 +662,27 @@
                 }
                 subMatch = matchPatterns(pattern.inner,
                                          stx[0].token.inner,
-                                         env,
+                                         context,
                                          false);
                 rest = stx.slice(1);
+                success = subMatch.success;
             } else {
-                return {
-                    success: false,
-                    rest: stx,
-                    patternEnv: patternEnv
-                };
+                subMatch = matchPatterns(pattern.inner,
+                                         [],
+                                         context,
+                                         false);
+                success = false;
             }
-            success = subMatch.success;
-            patternEnv = loadPatternEnv(patternEnv,
-                                        subMatch.patternEnv,
-                                        topLevel,
-                                        pattern.repeat);
-
+            if(success) {
+                patternEnv = loadPatternEnv(patternEnv,
+                                            subMatch.patternEnv,
+                                            topLevel,
+                                            pattern.repeat);
+            } else if (pattern.repeat) {
+                patternEnv = initPatternEnv(patternEnv,
+                                            subMatch.patternEnv,
+                                            topLevel);
+            }
         } else {
             if (pattern.class === "wildcard") {
                 success = true;
@@ -651,7 +697,7 @@
                     rest = stx;
                 }
             } else {
-                match = matchPatternClass(pattern, stx, env);
+                match = matchPatternClass(pattern, stx, context);
                 success = match.result !== null;
                 rest = match.rest;
                 matchEnv = {
@@ -691,6 +737,19 @@
 
     }
 
+    function initPatternEnv(toEnv, fromEnv, topLevel) {
+        _.forEach(fromEnv, function(patternVal, patternKey) {
+            if (!toEnv[patternKey]) {
+                toEnv[patternKey] = {
+                    level: patternVal.level + 1,
+                    match: [patternVal],
+                    topLevel: topLevel
+                };
+            }
+        });
+        return toEnv;
+    }
+
     function loadPatternEnv(toEnv, fromEnv, topLevel, repeat, prefix) {
         prefix = prefix || '';
         _.forEach(fromEnv, function(patternVal, patternKey) {
@@ -714,7 +773,7 @@
         return toEnv;
     }
 
-    function matchLookbehind(patterns, stx, terms, env) {
+    function matchLookbehind(patterns, stx, terms, context) {
         var success, patternEnv, prevStx, prevTerms;
         // No lookbehind, noop.
         if (!patterns.length) {
@@ -723,7 +782,7 @@
             prevStx = stx;
             prevTerms = terms;
         } else {
-            var match = matchPatterns(patterns, stx, env, true);
+            var match = matchPatterns(patterns, stx, context, true);
             var last = match.result[match.result.length - 1];
             success = match.success;
             patternEnv = match.patternEnv;
@@ -771,7 +830,7 @@
         if (m.level === 0) {
             return m.match.length > 0;
         }
-        return m.match.every(function(m) { return hasMatch(m); });
+        return !!m.match;
     }
 
     // given the given the macroBody (list of Pattern syntax objects) and the
@@ -963,81 +1022,35 @@
         return newMatch;
     }
 
-    function makeIdentityRule(pattern, isInfix) {
-        var _s = 1;
+    function makeIdentityRule(pattern, isInfix, context) {
+        var inf = [];
+        var pat = [];
+        var stx = [];
 
-        function traverse(s, infix) {
-            var pat = [];
-            var stx = [];
-
-            for (var i = 0; i < s.length; i++) {
-                var tok1 = s[i];
-                var tok2 = s[i + 1];
-                var tok3 = s[i + 2];
-                var tok4 = s[i + 3];
-
-                // Pattern vars, ignore classes
-                if (isPatternVar(tok1)) {
-                    pat.push(tok1);
-                    stx.push(tok1);
-                    if (tok2 && tok2.token.type === parser.Token.Punctuator &&
-                        tok2.token.value === ":" &&
-                        tok3 && tok3.token.type === parser.Token.Identifier) {
-                        pat.push(tok2, tok3);
-                        i += 2;
-
-                        if (tok3.token.value === "invoke" ||
-                            tok3.token.value === "invokeRec" && tok4) {
-                            pat.push(tok4);
-                            i += 1;
-                        }
-                    }
+        if (isInfix) {
+            for (var i = 0; i < pattern.length; i++) {
+                if (pattern[i].token.type === parser.Token.Punctuator &&
+                    pattern[i].token.value === '|') {
+                    pat.push(makeIdent('$inf', context), makePunc(':', context),
+                             makeDelim('()', inf, context), pattern[0],
+                             makeIdent('$id', context), makePunc(':', context),
+                             makeDelim('()', pat.slice(i + 1), context));
+                    stx.push(makeIdent('$inf', context),
+                             makeIdent('$id', context));
+                    break;
                 }
-                // Rename wildcards
-                else if (tok1.token.type === parser.Token.Identifier &&
-                         tok1.token.value === "_") {
-                    var uident = syntax.makeIdent("$__wildcard" + (_s++), tok1);
-                    pat.push(uident);
-                    stx.push(uident);
-                }
-                // Don't traverse literal groups
-                else if (tok1.token.type === parser.Token.Identifier &&
-                         tok1.token.value === "$" &&
-                         tok2 && tok2.token.type === parser.Token.Delimiter &&
-                         tok2.token.value === "[]") {
-                    pat.push(tok1, tok2);
-                    stx.push(tok1, tok2);
-                    i += 1;
-                }
-                // Traverse delimiters
-                else if (tok1.token.type === parser.Token.Delimiter) {
-                    var sub = traverse(tok1.token.inner, false);
-                    var clone = syntaxFromToken(_.clone(tok1.token), tok1);
-                    tok1.token.inner = sub.pattern;
-                    clone.token.inner = sub.body;
-                    pat.push(tok1);
-                    stx.push(clone);
-                }
-                // Skip infix bar
-                else if (infix && tok1.token.type === parser.Token.Punctuator &&
-                         tok1.token.value === "|") {
-                    infix = false;
-                    pat.push(tok1);
-                }
-                // Tokens
-                else {
-                    pat.push(tok1);
-                    stx.push(tok1);
-                }
+                inf.push(pattern[i]);
             }
-
-            return {
-                pattern: pat,
-                body: stx
-            };
+        } else {
+            pat.push(makeIdent('$id', context), makePunc(':', context),
+                     makeDelim('()', pattern, context));
+            stx.push(makeIdent('$id', context));
         }
 
-        return traverse(pattern, isInfix);
+        return {
+            pattern: pat,
+            body: stx
+        };
     }
 
     exports.loadPattern = loadPattern;
