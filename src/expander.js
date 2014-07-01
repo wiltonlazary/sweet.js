@@ -936,6 +936,10 @@
         } else {
             transformer = macroObj.fn;
         }
+        
+        assert(typeof transformer === "function", "Macro transformer not bound for: " 
+               + head.token.value);
+        
 
         // create a new mark to be used for the input to
         // the macro
@@ -1671,7 +1675,8 @@
             // Potentially an infix macro
             // This should only be invoked on runtime syntax terms
             if (!head.isMacro && !head.isLetMacro && !head.isAnonMacro && !head.isOperatorDefinition &&
-                rest.length && nameInEnv(rest[0], rest.slice(1), context.env)) {
+                rest.length && nameInEnv(rest[0], rest.slice(1), context.env) &&
+                getMacroInEnv(rest[0], rest.slice(1), context.env).isOp === false) {
                 var infLeftTerm = opCtx.prevTerms[0] && opCtx.prevTerms[0].isPartial
                                   ? opCtx.prevTerms[0]
                                   : null;
@@ -2441,7 +2446,10 @@
     // a hack to make the top level hygiene work out
     function expandTopLevel(stx, moduleContexts, options) {
         moduleContexts = moduleContexts || [];
-        maxExpands = (_.isNumber(options) ? options : options && options._maxExpands) || Infinity;
+        options = options || {};
+        options.flatten = options.flatten != null ? options.flatten : true;
+        
+        maxExpands = options.maxExpands || Infinity;
         expandCount = 0;
 
         var context = makeTopLevelExpanderContext(options);
@@ -2454,7 +2462,8 @@
 
         var res = expand([syn.makeIdent("module", null), modBody], context);
         res = res[0].destruct();
-        return flatten(res[0].token.inner);
+        res = res[0].token.inner;
+        return options.flatten ? flatten(res) : res;
     }
 
     function expandModule(stx, moduleContexts, options) {
