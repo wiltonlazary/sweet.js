@@ -1900,6 +1900,7 @@
             makeKeyword: syn.makeKeyword,
             makePunc: syn.makePunc,
             makeDelim: syn.makeDelim,
+            filename: context.filename,
             require: function(id) {
                 if (context.requireModule) {
                     return context.requireModule(id, context.filename);
@@ -2436,7 +2437,7 @@
 
     function makeTopLevelExpanderContext(options) {
         var requireModule = options ? options.requireModule : undefined;
-        var filename = options ? options.filename : undefined;
+        var filename = options && options.filename ? options.filename : "<anonymous module>";
         return makeExpanderContext({
             filename: filename,
             requireModule: requireModule
@@ -2563,13 +2564,13 @@
                 acc.push(closeParen);
                 return acc;
             }
-            stx.token.sm_lineNumber = stx.token.sm_lineNumber
+            stx.token.sm_lineNumber = typeof stx.token.sm_lineNumber != 'undefined'
                                     ? stx.token.sm_lineNumber
                                     : stx.token.lineNumber;
-            stx.token.sm_lineStart = stx.token.sm_lineStart
+            stx.token.sm_lineStart = typeof stx.token.sm_lineStart != 'undefined'
                                     ? stx.token.sm_lineStart
                                     : stx.token.lineStart;
-            stx.token.sm_range = stx.token.sm_range
+            stx.token.sm_range = typeof stx.token.sm_range != 'undefined'
                                     ? stx.token.sm_range
                                     : stx.token.range;
             acc.push(stx);
