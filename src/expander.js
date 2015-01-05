@@ -23,6 +23,8 @@
   THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// import @ from "contracts.js"
+
 
 (function (root, factory) {
     if (typeof exports === 'object') {
@@ -108,12 +110,12 @@
             if (ctx.constructor === Mark) {
                 return remdup(ctx.mark, marksof(ctx.context, stopName, originalName));
             }
-            if(ctx.constructor === Def) {
+            if (ctx.constructor === Def) {
                 ctx = ctx.context;
                 continue;
             }
             if (ctx.constructor === Rename) {
-                if(stopName === originalName + "$" + ctx.name) {
+                if (stopName === originalName + "$" + ctx.name) {
                     return [];
                 }
                 ctx = ctx.context;
@@ -211,11 +213,11 @@
     }
 
     function arraysEqual(a, b) {
-        if(a.length !== b.length) {
+        if (a.length !== b.length) {
             return false;
         }
         for(var i = 0; i < a.length; i++) {
-            if(a[i] !== b[i]) {
+            if (a[i] !== b[i]) {
                 return false;
             }
         }
@@ -243,7 +245,7 @@
 
     var nextFresh = 0;
 
-    // fun () -> Num
+    // @ () -> Num
     function fresh() { return nextFresh++; }
 
 
@@ -475,7 +477,7 @@
     dataclass ForStatement          (keyword, cond)                     extends Statement;
     dataclass ReturnStatement       (keyword, expr)                     extends Statement {
         destruct() {
-            var expr = this.expr.destruct();        
+            var expr = this.expr.destruct();
             // need to adjust the line numbers to make sure that the expr
             // starts on the same line as the return keyword. This might
             // not be the case if an operator or infix macro perturbed the
@@ -650,7 +652,7 @@
             throwSyntaxError("enforest", "Unexpected end of input", varStx);
         }
 
-        if(expandCount >= maxExpands) {
+        if (expandCount >= maxExpands) {
             return null;
         }
 
@@ -752,6 +754,11 @@
     }
 
     function adjustLineContext(stx, original, current) {
+        // short circuit when the array is empty;
+        if (stx.length === 0) {
+            return stx;
+        }
+
         current = current || {
             lastLineNumber: stx[0].token.lineNumber || stx[0].token.startLineNumber,
             lineNumber: original.token.lineNumber
@@ -810,9 +817,6 @@
 
                 }
 
-                if (stx.token.inner.length > 0) {
-                    stx.token.inner = adjustLineContext(stx.token.inner, original, current);
-                }
                 return stx;
             }
             // handle tokens with missing line info
@@ -891,7 +895,7 @@
         if (name.length === 1) {
             if (env.names.get(unwrapSyntax(name[0]))) {
                 var resolvedName = resolve(name[0]);
-                if (env.has(resolvedName)) {
+                if (env.has(resolvedName) && !env.get(resolvedName).varTransform) {
                     return env.get(resolvedName);
                 }
             }
@@ -902,7 +906,7 @@
                 if (env.names.get(nameStr)) {
                     var nameStx = syn.makeIdent(nameStr, name[0]);
                     var resolvedName = resolve(nameStx);
-                    if (env.has(resolvedName)) {
+                    if (env.has(resolvedName) && !env.get(resolvedName).varTransform) {
                         return env.get(resolvedName);
                     }
                 }
@@ -936,10 +940,10 @@
         } else {
             transformer = macroObj.fn;
         }
-        
-        assert(typeof transformer === "function", "Macro transformer not bound for: " 
+
+        assert(typeof transformer === "function", "Macro transformer not bound for: "
                + head.token.value);
-        
+
 
         // create a new mark to be used for the input to
         // the macro
@@ -988,12 +992,12 @@
         }
 
 
-        if(!Array.isArray(rt.result)) {
+        if (!Array.isArray(rt.result)) {
             throwSyntaxError("enforest", "Macro must return a syntax array", stx[0]);
         }
 
 
-        if(rt.result.length > 0) {
+        if (rt.result.length > 0) {
             var adjustedResult = adjustLineContext(rt.result, head);
             if (stx[0].token.leadingComments) {
                 if (adjustedResult[0].token.leadingComments) {
@@ -1022,7 +1026,7 @@
         prevStx = prevStx || [];
         prevTerms = prevTerms || [];
 
-        if(expandCount >= maxExpands) {
+        if (expandCount >= maxExpands) {
             return { result: null,
                      rest: toks };
         }
@@ -1069,6 +1073,11 @@
                     if (uopMacroObj) {
                         uopMacroName = [uopSyntax].concat(rest.slice(0, uopMacroObj.fullName.length - 1));
                         opRest = rest.slice(uopMacroObj.fullName.length - 1);
+                    }
+                    else if (unwrapSyntax(uopSyntax) === 'yield' &&
+                            unwrapSyntax(opRest[0]) === '*') {
+                        uopSyntax = [uopSyntax, opRest[0]];
+                        opRest = opRest.slice(1);
                     }
 
                     var leftLeft = opCtx.prevTerms[0] && opCtx.prevTerms[0].isPartial
@@ -1312,16 +1321,16 @@
                               head.isObjGet ||
                               head.isObjDotGet ||
                               head.isThisExpression) &&
-                            rest[0] && rest[1] && !bopMacroObj && stxIsAssignOp(rest[0]))) {
+                            rest[0] && rest[1] && !bopMacroObj && (opCtx.op === null) && stxIsAssignOp(rest[0]))) {
                     var opRes = enforestAssignment(rest, context, head, prevStx, prevTerms);
-                    if(opRes && opRes.result) {
+                    if (opRes && opRes.result) {
                         return step(opRes.result, opRes.rest, _.extend({}, opCtx, {
                             prevStx: opRes.prevStx,
                             prevTerms: opRes.prevTerms
                         }));
                     }
                 // Postfix
-                } else if(head.isExpr &&
+                } else if (head.isExpr &&
                             (rest[0] && (unwrapSyntax(rest[0]) === "++" ||
                                          unwrapSyntax(rest[0]) === "--"))) {
                     // Check if the operator is a macro first.
@@ -1333,7 +1342,7 @@
 
                         if (opRes.prevTerms.length < opPrevTerms.length) {
                             return opRes;
-                        } else if(opRes.result) {
+                        } else if (opRes.result) {
                             return step(head,
                                         opRes.result.destruct().concat(opRes.rest),
                                         opCtx);
@@ -1343,7 +1352,7 @@
                                 rest.slice(1),
                                 opCtx);
                 // ObjectGet (computed)
-                } else if(head.isExpr &&
+                } else if (head.isExpr &&
                             (rest[0] && rest[0].token.value === "[]"))  {
                     return step(ObjGet.create(head, Delimiter.create(rest[0].expose())),
                                 rest.slice(1),
@@ -1356,7 +1365,7 @@
                              (rest[1].token.type === parser.Token.Identifier ||
                               rest[1].token.type === parser.Token.Keyword))) {
                     // Check if the identifier is a macro first.
-                    if (context.env.has(resolveFast(rest[1], context.env))) {
+                    if (context.env.has(resolveFast(rest[1], context.env)) && nameInEnv(rest[1], [], context.env)) {
                         var headStx = tagWithTerm(head, head.destruct().reverse());
                         var dotTerm = Punc.create(rest[0]);
                         var dotTerms = [dotTerm].concat(head, prevTerms);
@@ -1365,7 +1374,7 @@
 
                         if (dotRes.prevTerms.length < dotTerms.length) {
                             return dotRes;
-                        } else if(dotRes.result) {
+                        } else if (dotRes.result) {
                             return step(head,
                                         [rest[0]].concat(dotRes.result.destruct(), dotRes.rest),
                                         opCtx);
@@ -1394,8 +1403,9 @@
                                 opCtx);
                 // return statement
                 } else if (head.isKeyword && unwrapSyntax(head.keyword) === "return") {
-                    if (rest[0]) {
-                        var returnPrevStx = tagWithTerm(head, head.destruct()).concat(opCtx.prevStx);
+                    if (rest[0] && rest[0].token.lineNumber === head.keyword.token.lineNumber) {
+                        var returnPrevStx = tagWithTerm(head,
+                                                        head.destruct()).concat(opCtx.prevStx);
                         var returnPrevTerms = [head].concat(opCtx.prevTerms);
                         var returnExpr = enforest(rest, context, returnPrevStx, returnPrevTerms);
                         if (returnExpr.prevTerms.length < opCtx.prevTerms.length) {
@@ -1403,9 +1413,13 @@
                         }
                         if (returnExpr.result.isExpr) {
                             return step(ReturnStatement.create(head, returnExpr.result),
-                                        returnExpr.rest, 
+                                        returnExpr.rest,
                                         opCtx);
                         }
+                    } else {
+                        return step(ReturnStatement.create(head, Empty.create()),
+                                   rest,
+                                   opCtx);
                     }
                 // let statements
                 } else if (head.isKeyword &&
@@ -1422,7 +1436,7 @@
                     if (rest[1] && rest[1].token.value === "=" &&
                         rest[2] && rest[2].token.value === "macro") {
                         var mac = enforest(rest.slice(2), context);
-                        if(mac.result) {
+                        if (mac.result) {
                             if (!mac.result.isAnonMacro) {
                                 throwSyntaxError("enforest", "expecting an anonymous macro definition in syntax let binding", rest.slice(2));
                             }
@@ -1585,7 +1599,7 @@
                                 rest.slice(4),
                                 opCtx);
                 // anonymous function definition
-                } else if(head.token.type === parser.Token.Keyword &&
+                } else if (head.token.type === parser.Token.Keyword &&
                     unwrapSyntax(head) === "function" &&
                     rest[0] && rest[0].token.type === parser.Token.Delimiter &&
                     rest[0].token.value === "()" &&
@@ -1601,7 +1615,7 @@
                                 rest.slice(2),
                                 opCtx);
                 // anonymous generator function definition
-                } else if(head.token.type === parser.Token.Keyword &&
+                } else if (head.token.type === parser.Token.Keyword &&
                     unwrapSyntax(head) === "function" &&
                     rest[0] && rest[0].token.type === parser.Token.Punctuator &&
                     rest[0].token.value === "*" &&
@@ -1619,7 +1633,7 @@
                                 rest.slice(3),
                                 opCtx);
                 // arrow function
-                } else if(((head.token.type === parser.Token.Delimiter &&
+                } else if (((head.token.type === parser.Token.Delimiter &&
                             head.token.value === "()") ||
                             head.token.type === parser.Token.Identifier) &&
                             rest[0] && rest[0].token.type === parser.Token.Punctuator &&
@@ -1662,7 +1676,7 @@
                                         rest[0].token.type === parser.Token.Punctuator ||
                                         rest[0].token.type === parser.Token.Delimiter &&
                                         rest[0].token.value === "()")) {
-                    // Consume optional semicolon                      
+                    // Consume optional semicolon
                     if (unwrapSyntax(rest[1]) === ";") {
                         rest.splice(1, 1);
                     }
@@ -1898,13 +1912,24 @@
         });
     }
 
+    function markIn(arr, mark) {
+        return arr.map(function(stx) {
+            return stx.mark(mark);
+        });
+    }
+
+    function markDefOut(arr, mark, def) {
+        return arr.map(function(stx) {
+            return stx.mark(mark).addDefCtx(def);
+        });
+    }
 
     // given the syntax for a macro, produce a macro transformer
     // (Macro) -> (([...CSyntax]) -> ReadTree)
     function loadMacroDef(body, context) {
 
         // raw function primitive form
-        if(!(body[0] && body[0].token.type === parser.Token.Keyword &&
+        if (!(body[0] && body[0].token.type === parser.Token.Keyword &&
              body[0].token.value === "function")) {
             throwSyntaxError("load macro", "Primitive macro form must contain a function for the macro body", body);
         }
@@ -1916,6 +1941,7 @@
         var flattend = flatten(expanded);
         var bodyCode = codegen.generate(parser.parse(flattend));
 
+        var localCtx;
         var macroFn = scopedEval(bodyCode, {
             makeValue: syn.makeValue,
             makeRegex: syn.makeRegex,
@@ -1930,8 +1956,20 @@
                 }
                 return require(id);
             },
+            localExpand: function(stx, stop) {
+                assert(!stop || stop.length === 0,
+                       "localExpand stop lists are not currently supported");
+
+                var markedStx = markIn(stx, localCtx.mark);
+                var terms = expand(markedStx, localCtx);
+                var newStx = terms.reduce(function(acc, term) {
+                    acc.push.apply(acc, term.destruct());
+                    return acc;
+                }, []);
+
+                return markDefOut(newStx, localCtx.mark, localCtx.defscope);
+            },
             getExpr: function(stx) {
-                var r;
                 if (stx.length === 0) {
                     return {
                         success: false,
@@ -1939,11 +1977,12 @@
                         rest: []
                     };
                 }
-                r = get_expression(stx, context);
+                var markedStx = markIn(stx, localCtx.mark); 
+                var r = get_expression(markedStx, localCtx);
                 return {
                     success: r.result !== null,
-                    result: r.result === null ? [] : r.result.destruct(),
-                    rest: r.rest
+                    result: r.result === null ? [] : markDefOut(r.result.destruct(), localCtx.mark, localCtx.defscope),
+                    rest: markDefOut(r.rest, localCtx.mark, localCtx.defscope)
                 };
             },
             getIdent: function(stx) {
@@ -1974,6 +2013,61 @@
                     rest: stx
                 };
             },
+            matchPatterns: function(syntax, topLevel, reverse) {
+                
+                function flatMap(input, selector) {
+                    var output = [], outputCount = 0,
+                        index = -1, count = input.length,
+                        elem, index2, count2;
+                    while (++index < count) {
+                        elem = selector(input[index], index, input);
+                        index2 = -1;
+                        count2 = elem.length;
+                        while (++index2 < count2) {
+                            output[outputCount++] = elem[index2];
+                        }
+                    }
+                    return output;
+                }
+                
+                var patterns = Array.prototype.slice.call(arguments, 1 + (
+                    // 1 if topLevel is boolean, else 0
+                    Number((typeof topLevel !== 'boolean') === false)) + (
+                    // 1 if reverse is boolean, else 0
+                    Number((typeof reverse  !== 'boolean') === false)));
+                
+                // Default topLevel to true
+                topLevel = topLevel === false ? false : true;
+                // Default reverse to false
+                reverse = reverse === true || false;
+                
+                patterns = flatMap(patterns, function flatten(pattern) {
+                    if (Array.isArray(pattern)) {
+                        if (Array.isArray(pattern[0])) {
+                            return flatMap(pattern, flatten);
+                        }
+                        return [pattern];
+                    }
+                    return pattern;
+                }).map(function(pattern) {
+                    return patternModule.loadPattern(pattern, reverse);
+                });
+                
+                var result, pattern, index = -1, count = patterns.length;
+                while (++index < count) {
+                    result = patternModule.matchPatterns(patterns[index], syntax, localCtx, topLevel);
+                    if (result.success) {
+                        return result;
+                    }
+                }
+                
+                return {
+                    success: false,
+                    result: [],
+                    rest: [],
+                    patternEnv: {}
+                };
+            },
             unwrapSyntax: syn.unwrapSyntax,
             throwSyntaxError: throwSyntaxError,
             throwSyntaxCaseError: throwSyntaxCaseError,
@@ -1995,7 +2089,10 @@
             }
         });
 
-        return macroFn;
+        return function(stx, context, prevStx, prevTerms) {
+            localCtx = context;
+            return macroFn(stx, context, prevStx, prevTerms);
+        };
     }
 
     // similar to `parse1` in the honu paper
@@ -2107,7 +2204,7 @@
                                    context.paramscope);
             }
 
-            if(head.isBlock && head.body.isDelimiter) {
+            if (head.isBlock && head.body.isDelimiter) {
                 head.body.delim.token.inner.forEach(function(term) {
                     if (term.isVariableStatement) {
                         addToDefinitionCtx(_.map(term.decls, function(decl)  { return decl.ident; }),
@@ -2119,7 +2216,7 @@
 
             }
 
-            if(head.isDelimiter) {
+            if (head.isDelimiter) {
                 head.delim.token.inner.forEach(function(term)  {
                     if (term.isVariableStatement) {
                         addToDefinitionCtx(_.map(term.decls, function(decl) { return decl.ident; }),
@@ -2134,7 +2231,7 @@
             if (head.isForStatement) {
                 head.cond.expose();
                 var forCond = head.cond.token.inner;
-                if(forCond[0] && resolve(forCond[0]) === "let" &&
+                if (forCond[0] && resolve(forCond[0]) === "let" &&
                    forCond[1] && forCond[1].token.type === parser.Token.Identifier) {
                     var letNew = fresh();
                     var letId = forCond[1];
@@ -2201,7 +2298,7 @@
                         return def.id.token.value === id.token.value &&
                             arraysEqual(marksof(def.id.context), marksof(id.context));
                     });
-                    /* 
+                    /*
                         When var declaration repeat one of the function parameters:
 
                         function foo(x) {
@@ -2214,7 +2311,7 @@
                         return param.token.value === id.token.value &&
                             arraysEqual(marksof(param.context), marksof(id.context));
                     });
-                    return (typeof varDeclRep === 'undefined') && 
+                    return (typeof varDeclRep === 'undefined') &&
                            (typeof paramDeclRep === 'undefined');
                 }
                 return true;
@@ -2277,7 +2374,9 @@
                 term.init = expandTermTreeToFinal(term.init, context);
             }
             return term;
-        } else if (term.isVariableStatement) {
+        } else if (term.isVariableStatement ||
+                   term.isLetStatement ||
+                   term.isConstStatement) {
             term.decls = _.map(term.decls, function(decl) {
                 return expandTermTreeToFinal(decl, context);
             });
@@ -2285,6 +2384,12 @@
         } else if (term.isDelimiter) {
             // expand inside the delimiter and then continue on
             term.delim.token.inner = expand(term.delim.expose().token.inner, context);
+            return term;
+        } else if (term.isId) {
+            var trans = context.env.get(resolve(term.id));
+            if (trans && trans.varTransform) {
+                term.id = syntaxFromToken(term.id.token, trans.varTransform);
+            }
             return term;
         } else if (term.isNamedFun ||
                    term.isAnonFun ||
@@ -2315,15 +2420,18 @@
 
             var paramNames = _.map(getParamIdentifiers(params), function(param) {
                 var freshName = fresh();
+                var renamed = param.rename(param, freshName);
+                context.env.names.set(renamed.token.value, true);
+                context.env.set(resolve(renamed), {varTransform: renamed})
                 return {
                     freshName: freshName,
                     originalParam: param,
-                    renamedParam: param.rename(param, freshName)
+                    renamedParam: renamed
                 };
             });
 
             var bodyContext = makeExpanderContext(_.defaults({
-                defscope: newDef, 
+                defscope: newDef,
                 // paramscope is used to filter out var redeclarations
                 paramscope: paramNames.map(function(p) {
                     return p.renamedParam;
@@ -2340,11 +2448,11 @@
             var expandedResult = expandToTermTree(renamedBody.token.inner, bodyContext);
             var bodyTerms = expandedResult.terms;
 
-            if(expandedResult.restStx) {
+            if (expandedResult.restStx) {
                 // The expansion was halted prematurely. Just stop and
                 // return what we have so far, along with the rest of the syntax
                 renamedBody.token.inner = expandedResult.terms.concat(expandedResult.restStx);
-                if(Array.isArray(term.body)) {
+                if (Array.isArray(term.body)) {
                     term.body = renamedBody.token.inner;
                 }
                 else {
@@ -2424,7 +2532,7 @@
             return expandTermTreeToFinal(term, trees.context);
         });
 
-        if(trees.restStx) {
+        if (trees.restStx) {
             terms.push.apply(terms, trees.restStx);
         }
 
@@ -2474,7 +2582,7 @@
         moduleContexts = moduleContexts || [];
         options = options || {};
         options.flatten = options.flatten != null ? options.flatten : true;
-        
+
         maxExpands = options.maxExpands || Infinity;
         expandCount = 0;
 
@@ -2541,67 +2649,106 @@
         }, stx);
     }
 
-    // break delimiter tree structure down to flat array of syntax objects
-    function flatten(stx) {
-        return _.reduce(stx, function(acc, stx) {
-            if (stx.token.type === parser.Token.Delimiter) {
-                var exposed = stx.expose();
-                var openParen = syntaxFromToken({
-                    type: parser.Token.Punctuator,
-                    value: stx.token.value[0],
-                    range: stx.token.startRange,
-                    sm_range: (typeof stx.token.sm_startRange == 'undefined'
-                                ? stx.token.startRange
-                                : stx.token.sm_startRange),
-                    lineNumber: stx.token.startLineNumber,
-                    sm_lineNumber: (typeof stx.token.sm_startLineNumber == 'undefined'
-                                    ? stx.token.startLineNumber
-                                    : stx.token.sm_startLineNumber),
-                    lineStart: stx.token.startLineStart,
-                    sm_lineStart: (typeof stx.token.sm_startLineStart == 'undefined'
-                                   ? stx.token.startLineStart
-                                   : stx.token.sm_startLineStart)
-                }, exposed);
-                var closeParen = syntaxFromToken({
-                    type: parser.Token.Punctuator,
-                    value: stx.token.value[1],
-                    range: stx.token.endRange,
-                    sm_range: (typeof stx.token.sm_endRange == 'undefined'
-                                ? stx.token.endRange
-                                : stx.token.sm_endRange),
-                    lineNumber: stx.token.endLineNumber,
-                    sm_lineNumber: (typeof stx.token.sm_endLineNumber == 'undefined'
-                                    ? stx.token.endLineNumber
-                                    : stx.token.sm_endLineNumber),
-                    lineStart: stx.token.endLineStart,
-                    sm_lineStart: (typeof stx.token.sm_endLineStart == 'undefined'
-                                    ? stx.token.endLineStart
-                                    : stx.token.sm_endLineStart)
-                }, exposed);
-                if (stx.token.leadingComments) {
-                    openParen.token.leadingComments = stx.token.leadingComments;
+    // break delimiter tree structure down to flat array of syntax objects.
+    // do it without blowing the stack.
+    function flatten(stxs) {
+        var acc = [], accLen = 0;
+        var stack = [], frame;
+        var depth = 0;
+        var index = -1;
+        var count = stxs.length;
+        var stx, tok, exposed, openParen, closeParen;
+        
+        flattening: while (depth > -1) {
+            while (++index < count) {
+                if ((tok = ((stx = stxs[index]) && stx.token)) && tok.type === parser.Token.Delimiter) {
+                    exposed = stx.expose();
+                    
+                    openParen = syntaxFromToken({
+                        type: parser.Token.Punctuator,
+                        value: tok.value[0],
+                        range: tok.startRange,
+                        sm_range: (typeof tok.sm_startRange == 'undefined'
+                                    ? tok.startRange
+                                    : tok.sm_startRange),
+                        lineNumber: tok.startLineNumber,
+                        sm_lineNumber: (typeof tok.sm_startLineNumber == 'undefined'
+                                        ? tok.startLineNumber
+                                        : tok.sm_startLineNumber),
+                        lineStart: tok.startLineStart,
+                        sm_lineStart: (typeof tok.sm_startLineStart == 'undefined'
+                                       ? tok.startLineStart
+                                       : tok.sm_startLineStart)
+                    }, exposed);
+                    
+                    closeParen = syntaxFromToken({
+                        type: parser.Token.Punctuator,
+                        value: tok.value[1],
+                        range: tok.endRange,
+                        sm_range: (typeof tok.sm_endRange == 'undefined'
+                                    ? tok.endRange
+                                    : tok.sm_endRange),
+                        lineNumber: tok.endLineNumber,
+                        sm_lineNumber: (typeof tok.sm_endLineNumber == 'undefined'
+                                        ? tok.endLineNumber
+                                        : tok.sm_endLineNumber),
+                        lineStart: tok.endLineStart,
+                        sm_lineStart: (typeof tok.sm_endLineStart == 'undefined'
+                                        ? tok.endLineStart
+                                        : tok.sm_endLineStart)
+                    }, exposed);
+                    
+                    if (tok.leadingComments) {
+                        openParen.token.leadingComments = tok.leadingComments;
+                    }
+                    if (tok.trailingComments) {
+                        openParen.token.trailingComments = tok.trailingComments;
+                    }
+                    
+                    acc[accLen++] = openParen;
+                    stack[depth++] = [tok, closeParen, stxs, index];
+                    stxs = exposed.token.inner;
+                    index = -1;
+                    count = stxs.length;
+                    continue;
                 }
-                if (stx.token.trailingComments) {
-                    openParen.token.trailingComments = stx.token.trailingComments;
-                }
-                acc.push(openParen);
-                push.apply(acc, flatten(exposed.token.inner));
-                acc.push(closeParen);
-                return acc;
+                
+                tok.sm_lineNumber = typeof tok.sm_lineNumber != 'undefined'
+                                        ? tok.sm_lineNumber
+                                        : tok.lineNumber;
+                tok.sm_lineStart = typeof tok.sm_lineStart != 'undefined'
+                                        ? tok.sm_lineStart
+                                        : tok.lineStart;
+                tok.sm_range = typeof tok.sm_range != 'undefined'
+                                        ? tok.sm_range
+                                        : tok.range;
+                acc[accLen++] = stx;
             }
-            stx.token.sm_lineNumber = typeof stx.token.sm_lineNumber != 'undefined'
-                                    ? stx.token.sm_lineNumber
-                                    : stx.token.lineNumber;
-            stx.token.sm_lineStart = typeof stx.token.sm_lineStart != 'undefined'
-                                    ? stx.token.sm_lineStart
-                                    : stx.token.lineStart;
-            stx.token.sm_range = typeof stx.token.sm_range != 'undefined'
-                                    ? stx.token.sm_range
-                                    : stx.token.range;
-            acc.push(stx);
-            return acc;
-        }, []);
+            if (--depth > -1) {
+                frame = stack[depth];
+                tok = frame[0];
+                closeParen = frame[1];
+                acc[accLen++] = closeParen;
+                
+                tok.sm_lineNumber = typeof tok.sm_lineNumber != 'undefined'
+                                        ? tok.sm_lineNumber
+                                        : tok.lineNumber;
+                tok.sm_lineStart = typeof tok.sm_lineStart != 'undefined'
+                                        ? tok.sm_lineStart
+                                        : tok.lineStart;
+                tok.sm_range = typeof tok.sm_range != 'undefined'
+                                        ? tok.sm_range
+                                        : tok.range;
+                
+                stxs = frame[2];
+                index = frame[3];
+                count = stxs.length;
+                continue flattening;
+            }
+        }
+        return acc;
     }
+
 
     exports.StringMap = StringMap;
     exports.enforest = enforest;

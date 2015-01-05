@@ -1144,4 +1144,38 @@ describe("macro expander", function() {
         expect(res[0]).to.be(1);
         expect(res[1]).to.be(2);
     });
+
+    it("should follow return ASI", function() {
+        function foo() {
+            return
+            42;
+        }
+        expect(foo()).to.be(undefined);
+    });
+
+    it("should allow empty trailing macroclasses in delimiters", function() {
+        macroclass foo {
+            rule {}
+        }
+        macro m {
+            rule { (1 2 $x:foo) } => { true }
+        }
+        expect(m(1 2)).to.be(true);
+    });
+
+    it("should allow empty matches in recursive invoke", function() {
+        macro base_contract {
+            rule { $name } => { }
+        }
+        macro function_contract {
+            rule { ($dom:any_contract (,) ...) -> $range:any_contract } => {
+                "fun"
+            }
+        }
+        macro any_contract {
+            rule { $c:function_contract } => { $c }
+            rule { $c:base_contract } => { $c }
+        }
+        expect(any_contract (Str) -> Str).to.be("fun");
+    });
 });

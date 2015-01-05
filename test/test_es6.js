@@ -21,4 +21,35 @@ describe("es6 support", function() {
             expect(e).to.be.a(ReferenceError);
         });
     });
+
+    it("should expand macros in a let statement", function() {
+        macro m {
+            rule { } => { 42 }
+        }
+        let f = function() { return m; }
+        expect(f()).to.be(42);
+    });
+
+    it("should expand macros in a const statement", function() {
+        macro m {
+            rule { } => { 42 }
+        }
+        const f = function() { return m; }
+        expect(f()).to.be(42);
+    });
+
+    it("should support generators", function() {
+        function* first() {
+            yield 1;
+        }
+        function* id() {
+            while(true) {
+                yield* first();
+            }
+        }
+        var gen = id();
+        expect(gen.next().value).to.be(1);
+        expect(gen.next().value).to.be(1);
+    });
+
 });
