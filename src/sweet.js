@@ -45,7 +45,7 @@
                 moduleCache[key] = require(resolveSync(id, {basedir: basedir}));
             }
             return moduleCache[key];
-        }
+        };
 
         factory(exports,
                 require("underscore"),
@@ -157,7 +157,7 @@
         if (!isSyntax) {
             stx = syn.tokensToSyntax(stx);
         }
-        
+
         try {
             var result = expander.expand(stx, [stxcaseCtx].concat(modules), options);
             return isSyntax ? result : syn.syntaxToTokens(result);
@@ -185,7 +185,7 @@
     // (Str, {sourceMap: ?Bool, filename: ?Str})
     //    -> { code: Str, sourceMap: ?Str }
     function compile(code, options) {
-        var output;
+        var output, result = {};
         options = options || {};
         options.requireModule = options.requireModule || requireModule;
 
@@ -208,16 +208,15 @@
                 sourceMapWithCode: true
             }, options.escodegen));
 
-            return {
-                code: output.code,
-                sourceMap: output.map.toString()
-            };
-        }
-        return {
-            code: codegen.generate(ast, _.extend({
+            result.code = output.code;
+            result.sourceMap = output.map.toString();
+        } else {
+            result.code = codegen.generate(ast, _.extend({
                 comment: true
-            }, options.escodegen))
-        };
+            }, options.escodegen));
+        }
+        if (options.log) result.log = options.log;
+        return result;
     }
 
     function setReadtable(readtableModule) {
@@ -231,7 +230,7 @@
     function currentReadtable() {
         return parser.currentReadtable();
     }
-    
+
     function loadNodeModule(root, moduleName, options) {
         options = options || {};
         if (moduleName[0] === '.') {
