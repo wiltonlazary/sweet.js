@@ -1,13 +1,7 @@
-macro _destructure {
-    case { $ctx $x } => { return #{ $x } }
-}
-export _destructure;
+#lang "sweet.js";
 
-let var = macro {
-    case { $ctx $l = $r } => { 
-        return #{
-            _destructure $l
-        };
-    }
-}
-export var
+// export var id = function (x) {
+//   return x;
+// }
+
+export syntax m = ctx => #`1`;

@@ -7,16 +7,22 @@ process:
 	node-debug debug.js
 */
 
-var parser = require("./build/lib/parser");
-var expander = require("./build/lib/expander");
-var patterns = require("./build/lib/patterns");
-var sweet = require("./build/lib/sweet");
-var codegen = require("escodegen");
+var compile = require("./build/src/sweet").compile;
+var transform = require('babel-core').transform;
+var moduleResolver = require('./build/src/node-module-resolver').default;
+var moduleLoader = require('./build/src/node-module-loader').default;
 
 var fs = require("fs");
 
 var source = fs.readFileSync("./test.js", "utf8");
 
-var result = sweet.compile(source, {filename: "./test.js"});
-
-console.log(codegen.generate(parser.parse(result)));
+debugger;
+var result = compile(source, {
+	cwd: __dirname,
+	// transform: transform,
+	filename: './test.js',
+  moduleResolver: moduleResolver,
+  moduleLoader: moduleLoader,
+	enforcePragma: true
+});
+console.log(result.code);

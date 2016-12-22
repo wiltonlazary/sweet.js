@@ -1,71 +1,101 @@
-var expect = require("expect.js");
-var sweet = require("../build/lib/sweet.js");
-var expander = require("../build/lib/expander.js");
-var parser = require("../build/lib/parser.js");
-var codegen = require("escodegen");
+import { parse, expand } from "../src/sweet";
+import expect from "expect.js";
+import { expr, stmt, items, testEval } from "./assertions";
+import test from 'ava';
 
-describe("module loading", function() {
-    var modCode =
-        'macro m {' +
-            'function(stx) {' +
-                'return {' +
-                    'result: [makeValue(42, null)],' +
-                    'rest: stx.slice(1)' +
-                '}' +
-            '}' +
-        '}' +
-        'export m';
+test('should load a simple syntax transformer', () => {
+  let loader = {
+    "./m.js": `#lang "sweet.js";
+    export syntax m = function (ctx) {
+      return syntaxQuote\`1\`;
+    }`
+  };
+  testEval(`import { m } from "./m.js";
+  output = m`, 1, loader);
+});
 
-    it("should expand module contexts", function() {
-        var modCtx = expander.expandModule(parser.read(modCode), []);
-        var modExp = modCtx.exports[0].oldExport;
-        var modEnv = modCtx.env;
+test('importing for syntax with a single number exported', () => {
+  let loader = {
+    './num.js': `
+      #lang 'base';
+      export var n = 1;
+    `
+  };
 
-        expect(modCtx.exports.length).to.be(1);
-        expect(modExp.token.value).to.be('m');
-        expect(modEnv.has(expander.resolve(modExp))).to.be(true);
-    });
+  testEval(`
+    import { n } from './num.js' for syntax;
 
-    it("should import module exports", function() {
-        var modCtx = expander.expandModule(parser.read(modCode), []);
-        var testStx = parser.read('m + 12;');
-        var testRes = codegen.generate(parser.parse(expander.expand(testStx, [modCtx])));
-        expect(testRes).to.be('42 + 12;');
-    });
+    syntax m = function (ctx) {
+      if (n === 1) {
+        return #\`true\`;
+      }
+      return #\`false\`;
+    }
+    output = m;
+  `, true, loader);
+});
 
-    it("should import module exports and avoid the source map regression", function() {
-        var modCtx = sweet.loadModule("macro m {\nrule { $m } => {\n$m }} export m;");
-        var testStx = parser.read('m foo;');
-        var testRes = sweet.compile("m foo", {
-            modules: [modCtx],
-            sourceMap: true,
-            filename: "foo.js"
-        });
-        expect(testRes.code).to.be("foo;");
-    });
+test('importing for syntax with single function exported', () => {
+  let loader = {
+    './id.js': `
+      #lang 'base';
+      export var id = function (x) {
+        return x;
+      }
+    `
+  };
+  testEval(`
+    import { id } from './id.js' for syntax;
 
-    it("should load module contexts from code with loadModule", function() {
-        var modCtx = sweet.loadModule('macro m { rule {} => { 42 } } export m');
-        var modExp = modCtx.exports[0].oldExport;
-        var modEnv = modCtx.env;
+    syntax m = ctx => {
+      return id(#\`1\`);
+    }
+    output = m;
+  `, 1, loader);
+});
 
-        expect(modCtx.exports.length).to.be(1);
-        expect(modExp.token.value).to.be('m');
-        expect(modEnv.has(expander.resolve(modExp))).to.be(true);
-    });
 
-    it("should export multi-token macro names", function() {
-        var modCtx = sweet.loadModule('macro (???) { rule {} => { 42 } } export (???)');
-        var modExp = modCtx.exports[0].oldExport;
-        var modEnv = modCtx.env;
+test('importing a macro for syntax', () => {
+  let loader = {
+    './id.js': `
+      #lang 'base';
+      export syntax m = function (ctx) {
+        return #\`1\`;
+      }
+    `
+  };
+  testEval(`
+    import { m } from './id.js' for syntax;
 
-        expect(modCtx.exports.length).to.be(1);
-        expect(modExp.token.value).to.be('???');
-        expect(modEnv.has(expander.resolve(modExp))).to.be(true);
-    });
-    
-    it("should consume an optional trailing semicolon", function() {
-        var testRes = sweet.compile('macro m { rule {} => { 42 } } export m;').code;
-        expect(testRes).to.be('');
-    });
+    syntax m = ctx => {
+      let x = m;
+      return #\`1\`;
+    }
+    output = m;
+  `, 1, loader);
+});
+
+test('importing a macro for syntax only binds what is named', () => {
+  let loader = {
+    './id.js': `
+      #lang 'base';
+      syntax n = ctx => #\`2\`;
+
+      export syntax m = function (ctx) {
+        return #\`1\`;
+      }
+
+    `
+  };
+  testEval(`
+    import { m } from './id.js' for syntax;
+
+    syntax test = ctx => {
+      if (typeof n !== 'undefined' && n === 2) {
+        throw new Error('un-exported and un-imported syntax should not be bound');
+      }
+      return #\`1\`;
+    }
+    output = test;
+  `, 1, loader);
 });

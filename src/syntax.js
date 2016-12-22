@@ -1,523 +1,576 @@
-// import @ from "contracts.js"
+// @flow
+import { List, Map } from "immutable";
+import { assert } from "./errors";
+import BindingMap from "./binding-map";
+import { Maybe } from "ramda-fantasy";
+import * as _ from 'ramda';
 
-(function (root, factory) {
-    if (typeof exports === 'object') {
-        // CommonJS
-        factory(exports, require('underscore'),  require("./parser"), require("./expander"));
-    } else if (typeof define === 'function' && define.amd) {
-        // AMD. Register as an anonymous module.
-        define(['exports', 'underscore', 'parser', 'expander'], factory);
+import { TokenType, TokenClass } from "./tokens";
+
+type Token = {
+  type: any;
+  value: any;
+  slice: any;
+};
+
+type TokenTag =
+  'null' |
+  'number' |
+  'string' |
+  'punctuator' |
+  'keyword' |
+  'identifier' |
+  'regularExpression' |
+  'boolean' |
+  'braces' |
+  'parens' |
+  'delimiter' |
+  'eof' |
+  'template' |
+  'assign' |
+  'syntaxTemplate' |
+  'brackets'
+
+function getFirstSlice(stx: ?Syntax) {
+  if ((!stx) || typeof stx.isDelimiter !== 'function') return null; // TODO: should not have to do this
+  if (!stx.isDelimiter()) {
+    return stx.token.slice;
+  }
+  return stx.token.get(0).token.slice;
+}
+
+function sizeDecending(a, b) {
+  if (a.scopes.size > b.scopes.size) {
+    return -1;
+  } else if (b.scopes.size > a.scopes.size) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+type TypesHelper = {
+  [key: TokenTag]: {
+    match(token: any): boolean;
+    create?: (value: any, stx: ?Syntax) => Syntax;
+  }
+}
+
+export let Types: TypesHelper = {
+  null: {
+    match: token => !Types.delimiter.match(token) && token.type === TokenType.NULL,
+    create: (value, stx) => new Syntax({
+      type: TokenType.NULL,
+      value: null
+    }, stx)
+  },
+  number: {
+    match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.NumericLiteral,
+    create: (value, stx) => new Syntax({
+      type: TokenType.NUMBER,
+      value
+    }, stx)
+  },
+  string: {
+		match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.StringLiteral,
+    create: (value, stx) => new Syntax({
+      type: TokenType.STRING,
+      str: value
+    }, stx)
+  },
+  punctuator: {
+		match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.Punctuator,
+    create: (value, stx) => new Syntax({
+      type: {
+        klass: TokenClass.Punctuator,
+        name: value
+      },
+      value
+    }, stx)
+  },
+  keyword: {
+		match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.Keyword,
+    create: (value, stx) => new Syntax({
+      type: {
+        klass: TokenClass.Keyword,
+        name: value
+      },
+      value
+    }, stx)
+  },
+  identifier: {
+		match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.Ident,
+    create: (value, stx) => new Syntax({
+      type: TokenType.IDENTIFIER,
+      value
+    }, stx)
+  },
+  regularExpression: {
+		match: token => !Types.delimiter.match(token) && token.type.klass === TokenClass.RegularExpression,
+    create: (value, stx) => new Syntax({
+      type: TokenType.REGEXP,
+      value
+    }, stx)
+  },
+  braces: {
+		match: token => Types.delimiter.match(token) &&
+           token.get(0).token.type === TokenType.LBRACE,
+    create: (inner, stx) => {
+      let left = new Syntax({
+        type: TokenType.LBRACE,
+        value: "{",
+        slice: getFirstSlice(stx)
+      });
+      let right = new Syntax({
+        type: TokenType.RBRACE,
+        value: "}",
+        slice: getFirstSlice(stx)
+      });
+      return new Syntax(List.of(left).concat(inner).push(right), stx);
     }
-}(this, function(exports, _, parser, expander) {
+  },
+  brackets: {
+		match: token => Types.delimiter.match(token) &&
+           token.get(0).token.type === TokenType.LBRACK,
+    create: (inner, stx) => {
+      let left = new Syntax({
+        type: TokenType.LBRACK,
+        value: "[",
+        slice: getFirstSlice(stx)
+      });
+      let right = new Syntax({
+        type: TokenType.RBRACK,
+        value: "]",
+        slice: getFirstSlice(stx)
+      });
+      return new Syntax(List.of(left).concat(inner).push(right), stx);
+    }
+  },
+  parens: {
+		match: token => Types.delimiter.match(token) &&
+           token.get(0).token.type === TokenType.LPAREN,
+    create: (inner, stx) => {
+      let left = new Syntax({
+        type: TokenType.LPAREN,
+        value: "(",
+        slice: getFirstSlice(stx)
+      });
+      let right = new Syntax({
+        type: TokenType.RPAREN,
+        value: ")",
+        slice: getFirstSlice(stx)
+      });
+      return new Syntax(List.of(left).concat(inner).push(right), stx);
+    }
+  },
 
-    function assert(condition, message) {
-        if (!condition) {
-            throw new Error('ASSERT: ' + message);
+  assign: {
+    match: token => {
+      if (Types.punctuator.match(token)) {
+        switch (token.value) {
+          case "=":
+          case "|=":
+          case "^=":
+          case "&=":
+          case "<<=":
+          case ">>=":
+          case ">>>=":
+          case "+=":
+          case "-=":
+          case "*=":
+          case "/=":
+          case "%=":
+            return true;
+          default:
+            return false;
         }
+      }
+      return false;
     }
+  },
 
-    // Keep an incrementing global counter so that a particular
-    // each new context object is assigned a unique "instance number"
-    // that it can be identified by. This helps with the memoization
-    // of the recursive resolveCtx implementation in expander.js.
-    // The memoization addresses issue #232.
-    var globalContextInstanceNumber = 1;
+  boolean: {
+    match: token => !Types.delimiter.match(token) && token.type === TokenType.TRUE ||
+           token.type === TokenType.FALSE
+  },
 
-    // @ let Token = {
-    //     type: ?Num,
-    //     value: ?Any,
-    //     range: ?[Num, Num]
-    // }
-    //
-    // @ let Context = Null or {
-    //     context: Context
-    // }
-    //
-    // @ let SyntaxObject = {
-    //     token: Token,
-    //     context: Context
-    // }
+  template: {
+    match: token => !Types.delimiter.match(token) && token.type === TokenType.TEMPLATE
+  },
 
+  delimiter: {
+    match: token => List.isList(token)
+  },
 
-    // (CSyntax, Str) -> CContext
-    function Rename(id, name, ctx, defctx) {
-        defctx = defctx || null;
+  syntaxTemplate: {
+    match: token => Types.delimiter.match(token) && token.get(0).val() === '#`'
+  },
 
-        this.id = id;
-        this.name = name;
-        this.context = ctx;
-        this.def = defctx;
-        this.instNum = globalContextInstanceNumber++;
+  eof: {
+    match: token => !Types.delimiter.match(token) && token.type === TokenType.EOS
+  },
+};
+export const ALL_PHASES = {};
+
+type Scopeset = {
+  all: List<any>;
+  phase: Map<number, any>;
+}
+
+export default class Syntax {
+  // token: Token | List<Token>;
+  token: any;
+  bindings: BindingMap;
+  scopesets: Scopeset;
+
+  constructor(token: any, oldstx: ?{ bindings: any; scopesets: any}) {
+    this.token = token;
+    this.bindings = oldstx && (oldstx.bindings != null) ? oldstx.bindings : new BindingMap();
+    this.scopesets = oldstx && (oldstx.scopesets != null) ? oldstx.scopesets : {
+      all: List(),
+      phase: Map()
+    };
+    Object.freeze(this);
+  }
+
+  static of(token: Token, stx: ?Syntax) {
+    return new Syntax(token, stx);
+  }
+
+  static from(type, value, stx: ?Syntax) {
+    if (!Types[type]) {
+      throw new Error(type + " is not a valid type");
     }
-
-    // (Num) -> CContext
-    function Mark(mark, ctx) {
-        this.mark = mark;
-        this.context = ctx;
-        this.instNum = globalContextInstanceNumber++;
+    else if (!Types[type].create) {
+      throw new Error("Cannot create a syntax from type " + type);
     }
-
-    function Def(defctx, ctx) {
-        this.defctx = defctx;
-        this.context = ctx;
-        this.instNum = globalContextInstanceNumber++;
+    let newstx = Types[type].create(value, stx);
+    let slice = getFirstSlice(stx);
+    if (slice != null) {
+      newstx.token.slice = slice;
     }
+    return newstx;
+  }
 
-    function Syntax(token, oldstx) {
-        this.token = token;
-        this.context = (oldstx && oldstx.context) ? oldstx.context : null;
-        this.deferredContext = (oldstx && oldstx.deferredContext) ? oldstx.deferredContext : null;
+  from(type: TokenTag, value: any) {
+    return Syntax.from(type, value, this);
+  }
+
+  fromNull() {
+    return this.from("null", null);
+  }
+
+  fromNumber(value: number) {
+    return this.from('number', value);
+  }
+
+  fromString(value: string) {
+    return this.from("string", value);
+  }
+
+  fromPunctuator(value: string) {
+    return this.from("punctuator", value);
+  }
+
+  fromKeyword(value: string) {
+    return this.from("keyword", value);
+  }
+
+  fromIdentifier(value: string) {
+    return this.from("identifier", value);
+  }
+
+  fromRegularExpression(value: any) {
+    return this.from("regularExpression", value);
+  }
+
+  fromBraces(inner: List<Syntax>) {
+    return this.from("braces", inner);
+  }
+
+  fromBrackets(inner: List<Syntax>) {
+    return this.from("brackets", inner);
+  }
+
+  fromParens(inner: List<Syntax>) {
+    return this.from("parens", inner);
+  }
+
+  static fromNull(stx: Syntax) {
+    return Syntax.from("null", null, stx);
+  }
+
+  static fromNumber(value, stx) {
+    return Syntax.from("number", value, stx);
+  }
+
+  static fromString(value, stx) {
+    return Syntax.from("string", value, stx);
+  }
+
+  static fromPunctuator(value, stx) {
+    return Syntax.from("punctuator", value, stx);
+  }
+
+  static fromKeyword(value, stx) {
+    return Syntax.from("keyword", value, stx);
+  }
+
+  static fromIdentifier(value, stx) {
+    return Syntax.from("identifier", value, stx);
+  }
+
+  static fromRegularExpression(value, stx) {
+    return Syntax.from("regularExpression", value, stx);
+  }
+
+  static fromBraces(inner, stx) {
+    return Syntax.from("braces", inner, stx);
+  }
+
+  static fromBrackets(inner, stx) {
+    return Syntax.from("brackets", inner, stx);
+  }
+
+  static fromParens(inner, stx) {
+    return Syntax.from("parens", inner, stx);
+  }
+
+  // () -> string
+  resolve(phase: any) {
+    assert(phase != null, "must provide a phase to resolve");
+    let allScopes = this.scopesets.all;
+    let stxScopes = this.scopesets.phase.has(phase) ? this.scopesets.phase.get(phase) : List();
+    stxScopes = allScopes.concat(stxScopes);
+    if (stxScopes.size === 0 || !(this.match('identifier') || this.match('keyword'))) {
+      return this.token.value;
     }
+    let scope = stxScopes.last();
+    let bindings = this.bindings;
+    if (scope) {
+      // List<{ scopes: List<Scope>, binding: Symbol }>
+      let scopesetBindingList = bindings.get(this);
 
-    Syntax.prototype = {
-        // (Int) -> CSyntax
-        // non mutating
-        mark: function(newMark) {
-            if (this.token.inner) {
-                return syntaxFromToken(this.token, {deferredContext: new Mark(newMark, this.deferredContext),
-                                                    context: new Mark(newMark, this.context)});
-            }
-            return syntaxFromToken(this.token, {context: new Mark(newMark, this.context)});
-        },
+      if (scopesetBindingList) {
+        // { scopes: List<Scope>, binding: Symbol }
+        let biggestBindingPair = scopesetBindingList.filter(({scopes}) => {
+          return scopes.isSubset(stxScopes);
+        }).sort(sizeDecending);
 
-        // (CSyntax or [...CSyntax], Str) -> CSyntax
-        // non mutating
-        rename: function(id, name, defctx) {
-            // defer renaming of delimiters
-            if (this.token.inner) {
-                return syntaxFromToken(this.token,
-                                       {deferredContext: new Rename(id, name, this.deferredContext, defctx),
-                                        context: new Rename(id, name, this.context, defctx)});
-            }
-
-            return syntaxFromToken(this.token,
-                                   {context: new Rename(id, name, this.context, defctx)});
-        },
-
-        addDefCtx: function(defctx) {
-            if (this.token.inner) {
-                return syntaxFromToken(this.token,
-                                       {deferredContext: new Def(defctx, this.deferredContext),
-                                        context: new Def(defctx, this.context)});
-            }
-            return syntaxFromToken(this.token, {context: new Def(defctx, this.context)});
-        },
-
-        getDefCtx: function() {
-            var ctx = this.context;
-            while(ctx !== null) {
-                if (ctx instanceof Def) {
-                    return ctx.defctx;
-                }
-                ctx = ctx.context;
-            }
-            return null;
-        },
-
-        addLineComment: function(comment) {
-            var newComment = {
-                type: "Line",
-                value: comment,
-                // hacky way to get around some bugs in esprima: https://github.com/mozilla/sweet.js/issues/468#issuecomment-95996634
-                range: [0, 0]
-            };
-
-            if (this.token.leadingComments) {
-                this.token.leadingComments.push(newComment);
-            } else {
-                this.token.leadingComments = [newComment];
-            }
-            return this;
-        },
-
-
-        expose: function() {
-            assert(this.token.type === parser.Token.Delimiter,
-                          "Only delimiters can be exposed");
-
-            function applyContext(stxCtx, ctx) {
-                if (ctx == null) {
-                    return stxCtx;
-                } else if (ctx instanceof Rename) {
-                    return new Rename(ctx.id,
-                                  ctx.name,
-                                  applyContext(stxCtx, ctx.context),
-                                  ctx.def);
-                } else if (ctx instanceof Mark) {
-                    return new Mark(ctx.mark, applyContext(stxCtx, ctx.context));
-                } else if (ctx instanceof Def) {
-                    return new Def(ctx.defctx, applyContext(stxCtx, ctx.context));
-                } else {
-                    assert(false, "unknown context type");
-                }
-            }
-
-            var self = this;
-            this.token.inner = _.map(this.token.inner, function(stx) {
-                // when not a syntax object (aka a TermTree) then no need to push down the expose
-                if (!stx.token) { return stx; }
-                if (stx.token.inner) {
-                    return syntaxFromToken(stx.token,
-                                           {deferredContext: applyContext(stx.deferredContext, self.deferredContext),
-                                            context: applyContext(stx.context, self.deferredContext)});
-                } else {
-                    return syntaxFromToken(stx.token,
-                                           {context: applyContext(stx.context, self.deferredContext)});
-                }
-            });
-            this.deferredContext = null;
-            return this;
-        },
-
-        toString: function() {
-            var val = this.token.type === parser.Token.EOF ? "EOF" : this.token.value;
-            return "[Syntax: " + val + "]";
-        },
-
-        clone: function() {
-            var newTok = {};
-            var keys = Object.keys(this.token);
-
-            for(var i = 0, len = keys.length, key; i < len; i++) {
-                key = keys[i];
-                if (Array.isArray(this.token[key])) {
-                    if (key === "inner") {
-                        // need to clone the children of a delimiter
-                        newTok[key] = this.token[key].reduce(function(acc, stx) {
-                            acc.push(stx.clone());
-                            return acc;
-                        }, []);
-                    } else {
-                        // don't need to deep copy normal arrays
-                        newTok[key] = this.token[key].reduce(function(acc, el) {
-                            acc.push(el);
-                            return acc;
-                        }, []);
-                    }
-                } else {
-                    newTok[key] = this.token[key];
-                }
-            }
-            return syntaxFromToken(newTok, this);
+        if (biggestBindingPair.size >= 2 &&
+            biggestBindingPair.get(0).scopes.size === biggestBindingPair.get(1).scopes.size) {
+          let debugBase = '{' + stxScopes.map(s => s.toString()).join(', ') + '}';
+          let debugAmbigousScopesets = biggestBindingPair.map(({scopes}) => {
+            return '{' + scopes.map(s => s.toString()).join(', ') + '}';
+          }).join(', ');
+          throw new Error('Scopeset ' + debugBase + ' has ambiguous subsets ' + debugAmbigousScopesets);
+        } else if (biggestBindingPair.size !== 0) {
+          let bindingStr = biggestBindingPair.get(0).binding.toString();
+          if (Maybe.isJust(biggestBindingPair.get(0).alias)) {
+            // null never happens because we just checked if it is a Just
+            return biggestBindingPair.get(0).alias.getOrElse(null).resolve(phase);
+          }
+          return bindingStr;
         }
+      }
+    }
+    return this.token.value;
+  }
+
+  val() {
+    assert(!this.match("delimiter"), "cannot get the val of a delimiter");
+    if (this.match("string")) {
+      return this.token.str;
+    }
+    if (this.match("template")) {
+      if (!this.token.items) return this.token.value;
+      return this.token.items.map(el => {
+        if (typeof el.match === 'function' && el.match("delimiter")) {
+          return '${...}';
+        }
+        return el.slice.text;
+      }).join('');
+    }
+    return this.token.value;
+  }
+
+  lineNumber() {
+    if (!this.match("delimiter")) {
+      return this.token.slice.startLocation.line;
+    } else {
+      return this.token.get(0).lineNumber();
+    }
+  }
+
+  setLineNumber(line: number) {
+    let newTok = {};
+    if (this.isDelimiter()) {
+      newTok = this.token.map(s => s.setLineNumber(line));
+    } else {
+      for (let key of Object.keys(this.token)) {
+        newTok[key] = this.token[key];
+      }
+      assert(newTok.slice && newTok.slice.startLocation, 'all tokens must have line info');
+      newTok.slice.startLocation.line = line;
+    }
+    return new Syntax(newTok, this);
+  }
+
+  // () -> List<Syntax>
+  inner() {
+    assert(this.match("delimiter"), "can only get the inner of a delimiter");
+    return this.token.slice(1, this.token.size - 1);
+  }
+
+  addScope(scope: any, bindings: any, phase: number, options: any = { flip: false }) {
+    let token = this.match('delimiter') ? this.token.map(s => s.addScope(scope, bindings, phase, options)) : this.token;
+    if (this.match('template')) {
+      token = _.merge(token, {
+        items: token.items.map(it => {
+          if (it instanceof Syntax && it.match('delimiter')) {
+            return it.addScope(scope, bindings, phase, options);
+          }
+          return it;
+        })
+      });
+    }
+    let oldScopeset;
+    if (phase === ALL_PHASES) {
+      oldScopeset = this.scopesets.all;
+    } else {
+      oldScopeset = this.scopesets.phase.has(phase) ? this.scopesets.phase.get(phase) : List();
+    }
+    let newScopeset;
+    if (options.flip) {
+      let index = oldScopeset.indexOf(scope);
+      if (index !== -1) {
+        newScopeset = oldScopeset.remove(index);
+      } else {
+        newScopeset = oldScopeset.push(scope);
+      }
+    } else {
+      newScopeset = oldScopeset.push(scope);
+    }
+    let newstx = {
+      bindings,
+      scopesets: {
+        all: this.scopesets.all,
+        phase: this.scopesets.phase
+      }
     };
 
-    function syntaxFromToken(token, oldstx) {
-        return new Syntax(token, oldstx);
+    if (phase === ALL_PHASES) {
+      newstx.scopesets.all = newScopeset;
+    } else {
+      newstx.scopesets.phase = newstx.scopesets.phase.set(phase, newScopeset);
     }
+    return new Syntax(token, newstx);
+  }
 
-    function mkSyntax(stx, value, type, inner) {
-        if (stx && Array.isArray(stx) && stx.length === 1) {
-            stx = stx[0];
-        } else if (stx && Array.isArray(stx)) {
-            throwSyntaxError("mkSyntax", "Expecting a syntax object or an array with a single syntax object");
-        } else if (stx === undefined) {
-            throwSyntaxError("mkSyntax", "You must provide an old syntax object context (or null) when creating a new syntax object.");
-        }
-
-        if (type === parser.Token.Delimiter) {
-            var startLineNumber, startLineStart, endLineNumber, endLineStart, startRange, endRange;
-            if (!Array.isArray(inner)) {
-                throwSyntaxError("mkSyntax", "Must provide inner array of syntax objects when creating a delimiter");
-            }
-
-            if(stx && stx.token.type === parser.Token.Delimiter) {
-                startLineNumber = stx.token.startLineNumber;
-                startLineStart = stx.token.startLineStart
-                endLineNumber = stx.token.endLineNumber;
-                endLineStart = stx.token.endLineStart;
-                startRange = stx.token.startRange;
-                endRange = stx.token.endRange;
-            } else if (stx && stx.token){
-                startLineNumber = stx.token.lineNumber;
-                startLineStart = stx.token.lineStart;
-                endLineNumber = stx.token.lineNumber;
-                endLineStart = stx.token.lineStart;
-                startRange = stx.token.range;
-                endRange = stx.token.range
-            }
-
-            return syntaxFromToken({
-                type: parser.Token.Delimiter,
-                value: value,
-                inner: inner,
-                startLineStart: startLineStart,
-                startLineNumber: startLineNumber,
-                endLineStart: endLineStart,
-                endLineNumber: endLineNumber,
-                startRange: startRange,
-                endRange: endRange
-            }, stx);
-        } else {
-            var lineStart, lineNumber, range;
-            if (stx && stx.token.type === parser.Token.Delimiter) {
-                lineStart = stx.token.startLineStart;
-                lineNumber = stx.token.startLineNumber;
-                range = stx.token.startRange;
-            } else if(stx && stx.token) {
-                lineStart = stx.token.lineStart;
-                lineNumber = stx.token.lineNumber;
-                range = stx.token.range;
-            }
-
-            return syntaxFromToken({
-                type: type,
-                value: value,
-                lineStart: lineStart,
-                lineNumber: lineNumber,
-                range: range
-            }, stx);
-        }
-
-    }
-
-
-    function makeValue(val, stx) {
-        if(typeof val === 'boolean') {
-            return mkSyntax(stx, val ? "true" : "false", parser.Token.BooleanLiteral);
-        } else if (typeof val === 'number') {
-            if (val !== val) {
-                return makeDelim('()', [makeValue(0, stx), makePunc('/', stx), makeValue(0, stx)], stx);
-            } if (val < 0) {
-                return makeDelim('()', [makePunc('-', stx), makeValue(Math.abs(val), stx)], stx);
-            } else {
-                return mkSyntax(stx, val, parser.Token.NumericLiteral);
-            }
-        } else if (typeof val === 'string') {
-            return mkSyntax(stx, val, parser.Token.StringLiteral);
-        } else if (val === null) {
-            return mkSyntax(stx, 'null', parser.Token.NullLiteral);
-        } else {
-            throwSyntaxError("makeValue", "Cannot make value syntax object from: " + val);
-        }
-    }
-
-    function makeRegex(val, flags, stx) {
-        var newstx = mkSyntax(stx, new RegExp(val, flags), parser.Token.RegexLiteral);
-        // regex tokens need the extra field literal on token
-        newstx.token.literal = val;
-        return newstx;
-    }
-
-    function makeIdent(val, stx) {
-        return mkSyntax(stx, val, parser.Token.Identifier);
-    }
-
-    function makeKeyword(val, stx) {
-        return mkSyntax(stx, val, parser.Token.Keyword);
-    }
-
-    function makePunc(val, stx) {
-        return mkSyntax(stx, val, parser.Token.Punctuator);
-    }
-
-    function makeDelim(val, inner, stx) {
-        return mkSyntax(stx, val, parser.Token.Delimiter, inner);
-    }
-
-    function unwrapSyntax(stx) {
-        if (Array.isArray(stx) && stx.length === 1) {
-            // pull stx out of single element arrays for convenience
-            stx = stx[0];
-        }
-
-        if (stx.token) {
-            if(stx.token.type === parser.Token.Delimiter) {
-                return stx.token;
-            } else {
-                return stx.token.value;
-            }
-        } else {
-            throw new Error ("Not a syntax object: " + stx);
-        }
-    }
-
-
-    // ([...CSyntax]) -> [...CToken]
-    function syntaxToTokens(stx) {
-        return _.map(stx, function(stx) {
-            if (stx.token.inner) {
-                stx.token.inner = syntaxToTokens(stx.token.inner);
-            }
-            return stx.token;
-        });
-    }
-
-    // (CToken or [...CToken]) -> [...CSyntax]
-    function tokensToSyntax(tokens) {
-        if (!_.isArray(tokens)) {
-            tokens = [tokens];
-        }
-        return _.map(tokens, function(token) {
-            if (token.inner) {
-                token.inner = tokensToSyntax(token.inner);
-            }
-            return syntaxFromToken(token);
-        });
-    }
-
-
-    // ([...CSyntax], Syntax) -> [...CSyntax])
-    function joinSyntax(tojoin, punc) {
-        if (tojoin.length === 0) { return []; }
-        if (punc === " ") { return tojoin; }
-
-        return _.reduce(_.rest(tojoin, 1), function (acc, join) {
-            acc.push(cloneSyntax(punc), join);
-            return acc;
-        }, [_.first(tojoin)]);
-    }
-
-
-    // ([...[...CSyntax]], Syntax) -> [...CSyntax]
-    function joinSyntaxArray(tojoin, punc) {
-        if (tojoin.length === 0) { return []; }
-        if (punc === " ") {
-            return _.flatten(tojoin, true);
-        }
-
-        return _.reduce(_.rest(tojoin, 1), function (acc, join){
-            acc.push(cloneSyntax(punc));
-            Array.prototype.push.apply(acc, join);
-            return acc;
-        }, _.first(tojoin));
-    }
-
-    function cloneSyntax(stx) {
-        return syntaxFromToken(_.clone(stx.token), stx);
-    }
-
-    function cloneSyntaxArray(arr) {
-        return arr.map(function(stx) {
-            var o = cloneSyntax(stx);
-            if (o.token.type === parser.Token.Delimiter) {
-                o.token.inner = cloneSyntaxArray(o.token.inner);
-            }
-            return o;
-        });
-    }
-
-    function MacroSyntaxError(name, message, stx) {
-        this.name = name;
-        this.message = message;
-        this.stx = stx;
-    }
-
-    function throwSyntaxError(name, message, stx) {
-        if (stx && Array.isArray(stx)) {
-          stx = stx[0];
-        }
-        throw new MacroSyntaxError(name, message, stx);
-    }
-
-    function SyntaxCaseError(message) {
-        this.message = message;
-    }
-
-    function throwSyntaxCaseError(message) {
-        throw new SyntaxCaseError(message);
-    }
-
-    function printSyntaxError(code, err) {
-        if (!err.stx) {
-            return '[' + err.name + '] ' + err.message;
-        }
-
-        var token = err.stx.token;
-        var lineNumber = _.find([token.sm_startLineNumber, token.sm_lineNumber, token.startLineNumber, token.lineNumber], _.isNumber);
-        var lineStart = _.find([token.sm_startLineStart, token.sm_lineStart, token.startLineStart, token.lineStart], _.isNumber);
-        var start = (token.sm_startRange || token.sm_range || token.startRange || token.range)[0];
-        var offset = start - lineStart;
-        var line = '';
-        var pre = lineNumber + ': ';
-        var ch;
-
-        while ((ch = code.charAt(lineStart++))) {
-            if (ch == '\r' || ch == '\n') {
-                break;
-            }
-            line += ch;
-        }
-
-        return '[' + err.name + '] ' + err.message + '\n' +
-               pre + line + '\n' +
-               (Array(offset + pre.length).join(' ')) + ' ^';
-    }
-
-    // fun ([...CSyntax]) -> String
-    function prettyPrint(stxarr, shouldResolve) {
-        var indent = 0;
-        var unparsedLines = stxarr.reduce(function(acc, stx) {
-            var s = shouldResolve ? expander.resolve(stx) : stx.token.value;
-            // skip the end of file token
-            if (stx.token.type === parser.Token.EOF) { return acc; }
-
-            if(stx.token.type === parser.Token.StringLiteral) {
-                s = '"' + s + '"';
-            }
-
-            if(s == '{') {
-                acc[0].str += ' ' + s;
-                indent++;
-                acc.unshift({ indent: indent, str: '' });
-            }
-            else if(s == '}') {
-                indent--;
-                acc.unshift({ indent: indent, str: s });
-                acc.unshift({ indent: indent, str: '' });
-            }
-            else if(s == ';') {
-                acc[0].str += s;
-                acc.unshift({ indent: indent, str: '' });
-            }
-            else {
-                acc[0].str += (acc[0].str ? ' ' : '') + s;
-            }
-
-            return acc;
-        }, [{ indent: 0, str: '' }]);
-
-        return unparsedLines.reduce(function(acc, line) {
-            var ind = '';
-            while(ind.length < line.indent * 2) {
-                ind += ' ';
-            }
-            return ind + line.str + '\n' + acc;
-        }, '');
-    }
-
-    exports.assert = assert;
-
-    exports.unwrapSyntax = unwrapSyntax;
-    exports.makeDelim = makeDelim;
-    exports.makePunc = makePunc;
-    exports.makeKeyword = makeKeyword;
-    exports.makeIdent = makeIdent;
-    exports.makeRegex = makeRegex;
-    exports.makeValue = makeValue;
-
-    exports.Rename = Rename;
-    exports.Mark = Mark;
-    exports.Def = Def;
-
-    exports.syntaxFromToken = syntaxFromToken;
-    exports.tokensToSyntax = tokensToSyntax;
-    exports.syntaxToTokens = syntaxToTokens;
-    exports.isSyntax = function(obj) {
-        obj = Array.isArray(obj) ? obj[0] : obj;
-        return obj instanceof Syntax;
+  removeScope(scope: any, phase: number) {
+    let token = this.match('delimiter') ? this.token.map(s => s.removeScope(scope, phase)) : this.token;
+    let phaseScopeset = this.scopesets.phase.has(phase) ? this.scopesets.phase.get(phase) : List();
+    let allScopeset = this.scopesets.all;
+    let newstx = {
+      bindings: this.bindings,
+      scopesets: {
+        all: this.scopesets.all,
+        phase: this.scopesets.phase
+      }
     };
 
-    exports.joinSyntax = joinSyntax;
-    exports.joinSyntaxArray = joinSyntaxArray;
-    exports.cloneSyntax = cloneSyntax;
-    exports.cloneSyntaxArray = cloneSyntaxArray;
+    let phaseIndex = phaseScopeset.indexOf(scope);
+    let allIndex = allScopeset.indexOf(scope);
+    if (phaseIndex !== -1) {
+      newstx.scopesets.phase = this.scopesets.phase.set(phase, phaseScopeset.remove(phaseIndex));
+    } else if (allIndex !== -1) {
+      newstx.scopesets.all = allScopeset.remove(allIndex);
+    }
+    return new Syntax(token, newstx);
+  }
 
-    exports.prettyPrint = prettyPrint;
+  match(type: TokenTag, value: any) {
+    if (!Types[type]) {
+      throw new Error(type + " is an invalid type");
+    }
+    return Types[type].match(this.token) && (value == null ||
+      (value instanceof RegExp ? value.test(this.val()) : this.val() == value));
+  }
 
-    exports.MacroSyntaxError = MacroSyntaxError;
-    exports.throwSyntaxError = throwSyntaxError;
-    exports.SyntaxCaseError = SyntaxCaseError;
-    exports.throwSyntaxCaseError = throwSyntaxCaseError;
-    exports.printSyntaxError = printSyntaxError;
-}));
+  isIdentifier(value: string) {
+    return this.match("identifier", value);
+  }
+
+  isAssign(value: string) {
+    return this.match("assign", value);
+  }
+
+  isBooleanLiteral(value: boolean) {
+    return this.match("boolean", value);
+  }
+
+  isKeyword(value: string) {
+    return this.match("keyword", value);
+  }
+
+  isNullLiteral(value: any) {
+    return this.match("null", value);
+  }
+
+  isNumericLiteral(value: number) {
+    return this.match("number", value);
+  }
+
+  isPunctuator(value: string) {
+    return this.match("punctuator", value);
+  }
+
+  isStringLiteral(value: string) {
+    return this.match("string", value);
+  }
+
+  isRegularExpression(value: any) {
+    return this.match("regularExpression", value);
+  }
+
+  isTemplate(value: any) {
+    return this.match("template", value);
+  }
+
+  isDelimiter(value: any) {
+    return this.match("delimiter", value);
+  }
+
+  isParens(value: any) {
+    return this.match("parens", value);
+  }
+
+  isBraces(value: any) {
+    return this.match("braces", value);
+  }
+
+  isBrackets(value: any) {
+    return this.match("brackets", value);
+  }
+
+  isSyntaxTemplate(value: any) {
+    return this.match("syntaxTemplate", value);
+  }
+
+  isEOF(value: any) {
+    return this.match("eof", value);
+  }
+
+  toString() {
+    if (this.match("delimiter")) {
+      return this.token.map(s => s.toString()).join(" ");
+    }
+    if (this.match("string")) {
+      return "'" + this.token.str;
+    }
+    if (this.match("template")) {
+      return this.val();
+    }
+    return this.token.value;
+  }
+}

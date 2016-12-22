@@ -1,10 +1,13 @@
 {
   "name": "sweet.js",
   "description": "Hygienic Macros for JavaScript",
-  "main": "lib/sweet.js",
-  "version": "0.7.4",
+  "main": "dist/sweet.js",
+  "bin": {
+    "sjs": "bin/sjs"
+  },
+  "version": "2.2.1",
   "engines": {
-    "node": ">=0.4.0"
+    "node": ">5.0.0"
   },
   "author": "Tim Disney",
   "licenses": [
@@ -13,34 +16,67 @@
       "url": "http://github.com/mozilla/sweet.js/master/LICENSE.BSD"
     }
   ],
+  "browser": {
+    "babel-core": false,
+    "./build/src/node-module-loader.js": false,
+    "./build/src/node-module-resolver.js": false
+  },
   "scripts": {
-    "test": "node --harmony ./node_modules/.bin/grunt full --stack"
+    "clean": "rm -rf build",
+    "lint": "eslint src && flow",
+    "prebuild": "npm run lint && mkdir -p build/test build/sweet dist/",
+    "build:src": "babel --out-dir build/src src",
+    "build:test": "rsync -R test/**/*.js build & cp test/*.js build/test && babel --out-file build/test/assertions.js test/assertions.js",
+    "build:browser": "webpack build/src/sweet.js --output-library-target amd --output-library sweet",
+    "build": "npm run build:src && npm run build:test",
+    "pretest": "npm run build",
+    "test:curr": "ava build/test/test_default_readtable.js",
+    "test:smoke": "ava build/test/*.js !build/test/assertions.js",
+    "test:full": "npm run build && ava",
+    "test": "npm run test:smoke",
+    "profile": "node --prof profile.js && node --prof-process *v8.log > v8-processed.log && rm *v8.log",
+    "report": "nyc ava && nyc report --reporter=html",
+    "docs": "asciidoctorjs doc/1.0/tutorial.adoc & asciidoctorjs doc/1.0/reference.adoc",
+    "dist": "npm run build && npm run build:browser && npm run docs && cp -r build/src/ dist"
   },
   "directories": {
     "test": "test"
   },
-  "bin": {
-    "sjs": "bin/sjs"
-  },
   "dependencies": {
-    "optimist": "~0.3.4",
-    "underscore": "~1.3.3",
-    "escodegen": "1.6.x",
-    "escope": "1.0.x",
-    "resolve": "~0.6.1"
+    "sweet-spec": "1.1.0",
+    "babel-core": "^6.5.0",
+    "immutable": "^3.7.4",
+    "ramda": "^0.19.0",
+    "ramda-fantasy": "^0.4.1",
+    "resolve": "^1.1.7",
+    "semver": "^5.3.0",
+    "shift-codegen": "^4.0.0",
+    "shift-js": "^0.2.1",
+    "shift-reducer": "^3.0.2",
+    "shift-spidermonkey-converter": "^1.0.0",
+    "transit-js": "^0.8.846",
+    "utils-dirname": "^1.0.0",
+    "yargs": "^4.3.2"
   },
   "devDependencies": {
-    "mocha": "~1.3.2",
-    "expect.js": "0.1.x",
-    "source-map": "~0.1.31",
-    "grunt-cli": "0.1.x",
-    "grunt-contrib-copy": "~0.4.1",
-    "grunt-contrib-jshint": "~0.7.2",
-    "grunt-mocha-test": "~0.7.0",
-    "grunt-contrib-watch": "~0.6.1",
-    "contracts-js": "^0.6.0",
-    "harmony-reflect": "^1.0.0",
-    "esfuzz": "disnet/esfuzz"
+    "asciidoctor-cli": "^1.5.2-alpha.3",
+    "asciidoctor.js": "^1.5.4",
+    "ava": "^0.15.0",
+    "babel": "^6.5.0",
+    "babel-cli": "^6.5.0",
+    "babel-eslint": "^7.0.0",
+    "babel-plugin-transform-flow-strip-types": "^6.14.0",
+    "babel-preset-es2015-node5": "^1.2.0",
+    "eslint": "^3.7.1",
+    "eslint-plugin-flowtype": "^2.11.4",
+    "event-stream": "^3.3.2",
+    "expect.js": "0.3.x",
+    "flow-bin": "^0.32.0",
+    "nyc": "^6.0.0",
+    "source-map": "~0.5.3",
+    "source-map-support": "^0.4.0",
+    "webpack": "^1.13.1",
+    "angular": "^1.6.0"
   },
   "repository": {
     "type": "git",
@@ -50,5 +86,17 @@
     "macros",
     "javascript"
   ],
-  "license": "BSD"
+  "license": "BSD-2-Clause",
+  "ava": {
+    "babel": "inherit",
+    "files": [
+      "build/test/*.js",
+      "build/test/declaration/*.js",
+      "build/test/destructuring/**/*.js",
+      "build/test/expressions/**/*.js",
+      "build/test/modules/**/*.js",
+      "build/test/statements/**/*.js",
+      "!build/test/assertions.js"
+    ]
+  }
 }

@@ -1,0 +1,20 @@
+{
+  "parser": "babel-eslint",
+  "plugins": [
+    "flowtype"
+  ],
+  "env": {
+    "es6": true,
+    "node": true
+  },
+  "ecmaVersion": 6,
+  "parserOptions": {
+    "sourceType": "module"
+  },
+  "extends": "plugin:flowtype/recommended",
+  "rules": {
+    "no-constant-condition": ["error", { "checkLoops": false }],
+    "comma-dangle": ["error", "only-multiline" ],
+    "no-console": ["warn"]
+  }
+}

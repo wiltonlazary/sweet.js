@@ -1,87 +1,41 @@
-[![Build Status](https://travis-ci.org/mozilla/sweet.js.png)](https://travis-ci.org/mozilla/sweet.js)
-
-# sweet.js
+[![Build Status](https://travis-ci.org/sweet-js/sweet.js.png)](https://travis-ci.org/sweet-js/sweet.js)
 
 [![Join the chat at https://gitter.im/mozilla/sweet.js](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/mozilla/sweet.js?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 Hygienic Macros for JavaScript!
 
-* Read a [tutorial](http://jlongster.com/Writing-Your-First-Sweet.js-Macro) on macros.
-* Read the documentation at [sweetjs.org](http://sweetjs.org).
-* Play with the [editor](http://sweetjs.org/browser/editor.html).
-* Hang out on IRC #sweet.js at irc.mozilla.org.
-* Try out other [macros](https://npmjs.org/browse/keyword/sweet-macros).
+Macros allow *you* to build the language of your dreams. Sweeten JavaScript by defining new syntax for your code.
 
-## Getting started
+Currently, Sweet should be considered experimental and under heavy development ([re-development](https://medium.com/@disnet/announcing-sweet-js-1-0-e7f4f3e15594#.fo9kyqu48) more like). As such, the API will be undergoing a bit of churn until probably the end of the year. So, probably best not to try Sweet in production systems just yet. If you're interested in helping out though we'd love to have you!
+
+# Getting started
 
 Install sweet.js with npm:
 
 ```sh
-$ npm install -g sweet.js
+$ npm install sweet.js
 ```
 
-And compile your sweet macro enhanced code:
-
-```sh
-$ sjs --output compiled.js my_sweet_code.js
-```
-
-## Sharing 
-
-You can collect your macros into a single module file to share with your other code or on npm. Full details [here](https://github.com/mozilla/sweet.js/wiki/modules) but the basic idea is to define your macros in a file `macros.js` and use the `export` keyword:
+Write your sweet code:
 
 ```js
-// macros.js
-macro m { ... }
-export m;
+syntax hi = function (ctx) {
+  return #`console.log('hello, world!')`;
+}
+hi
 ```
 
-Then compile using the `--module` flag:
+And compile:
 
 ```sh
-sjs --module /macros.js my_sweet_code.js
+$ node_modules/.bin/sjs my_sweet_code.js
+console.log('hello, world!')
 ```
 
-The `--module` also looks up along the `npm` path so you can install macro modules from `npm` (using [lambda-chop](https://github.com/natefaubion/lambda-chop) as an example):
+# Learning More
 
-```sh
-npm install lambda-chop
-sjs --module lambda-chop/macros my_sweet_code.js
-```
-
-If you want to share your macros on npm we recommend using the [sweet-macros](https://npmjs.org/browse/keyword/sweet-macros) keyword to make macros easy to find.
-
-## Hacking
-
-Install the dev dependencies:
-
-```sh
-$ npm install
-```
-
-Build and run the tests:
-
-```sh
-$ grunt
-```
-
-Sweet.js is self hosted so you hack on the files in `src/` using the version of sweet.js already built in `lib/`. When you are happy with your hacking, `grunt dist` will build a new version of sweet.js and put it into `lib/`.
-
-Slightly confusing but the process goes like this:
-
-```sh
-<hack hack hack>
-$ grunt
-<tests fail!>
-<hack hack hack>
-$ grunt
-<tests pass!>
-$ grunt dist
-$ git add lib/
-$ git commit -m "sweet!"
-```
-    
-
-## Credits
-
-Built on top of [esprima](http://esprima.org/) and [escodegen](https://github.com/Constellation/escodegen). [Contributors](https://github.com/mozilla/sweet.js/graphs/contributors) are awesome!
+* Read the [tutorial](http://sweetjs.org/doc/1.0/tutorial.html).
+* Read the [reference documentation](http://sweetjs.org/doc/1.0/reference.html).
+* Play with the [editor](http://sweetjs.org/browser/editor.html).
+* Discuss on [Google Groups](https://groups.google.com/forum/#!forum/sweetjs).
+* Hang out on IRC: #sweet.js at irc.mozilla.org.
