@@ -1,17 +1,21 @@
 // @flow
 
-import { isEOS } from './char-stream';
+import { isEOS, getCurrentReadtable } from 'readtable';
 import { code } from 'esutils';
-import { getHexValue } from './utils';
+import { isTerminating, getHexValue } from './utils';
 import { NumericToken } from '../tokens';
 
-import type CharStream from './char-stream';
+import type { CharStream } from 'readtable';
 
-const { isIdentifierPartES6: isIdentifierPart,
-        isIdentifierStartES6: isIdentifierStart,
-        } = code;
+const {
+  isIdentifierPartES6: isIdentifierPart,
+  isIdentifierStartES6: isIdentifierStart,
+} = code;
+
+let terminates;
 
 export default function readNumericLiteral(stream: CharStream) {
+  terminates = isTerminating(getCurrentReadtable());
   let idx = 0, char = stream.peek();
 
   if (char === '0') {
@@ -19,25 +23,29 @@ export default function readNumericLiteral(stream: CharStream) {
     if (!isEOS(char)) {
       char = char.toLowerCase();
       switch (char) {
-        case 'x': return readHexLiteral.call(this, stream);
-        case 'b': return readBinaryLiteral.call(this, stream);
-        case 'o': return readOctalLiteral.call(this, stream);
-        default: if (isDecimalChar(char)) {
-          return readLegacyOctalLiteral.call(this, stream); // reads legacy octal and decimal
-        }
+        case 'x':
+          return readHexLiteral.call(this, stream);
+        case 'b':
+          return readBinaryLiteral.call(this, stream);
+        case 'o':
+          return readOctalLiteral.call(this, stream);
+        default:
+          if (isDecimalChar(char)) {
+            return readLegacyOctalLiteral.call(this, stream); // reads legacy octal and decimal
+          }
       }
     } else {
       return new NumericToken({
-        value: +stream.readString()
+        value: +stream.readString(),
       });
     }
   } else if (char !== '.') {
-    while (isDecimalChar(char)) {
+    while (!terminates(char) && isDecimalChar(char)) {
       char = stream.peek(++idx);
     }
     if (isEOS(char)) {
       return new NumericToken({
-        value: +stream.readString(idx)
+        value: +stream.readString(idx),
       });
     }
   }
@@ -45,12 +53,12 @@ export default function readNumericLiteral(stream: CharStream) {
   idx = addDecimalLiteralSuffixLength.call(this, stream, idx);
 
   char = stream.peek(idx);
-  if (!isEOS(char) && isIdentifierStart(char)) {
+  if (!isEOS(char) && !terminates(char) && isIdentifierStart(char)) {
     throw this.createILLEGAL(char);
   }
 
   return new NumericToken({
-    value: +stream.readString(idx)
+    value: +stream.readString(idx),
   });
 }
 
@@ -62,7 +70,7 @@ function addDecimalLiteralSuffixLength(stream, idx) {
 
     while (isDecimalChar(char)) {
       char = stream.peek(++idx);
-      if (isEOS(char)) return idx;
+      if (terminates(char) || isEOS(char)) return idx;
     }
   }
 
@@ -77,7 +85,7 @@ function addDecimalLiteralSuffixLength(stream, idx) {
 
     while (isDecimalChar(char)) {
       char = stream.peek(++idx);
-      if (isEOS(char)) break;
+      if (terminates(char) || isEOS(char)) break;
     }
   }
   return idx;
@@ -86,11 +94,10 @@ function addDecimalLiteralSuffixLength(stream, idx) {
 function readLegacyOctalLiteral(stream) {
   let idx = 0, isOctal = true, char = stream.peek();
 
-
-  while (!isEOS(char)) {
-    if ("0" <= char && char <= "7") {
+  while (!terminates(char) && !isEOS(char)) {
+    if ('0' <= char && char <= '7') {
       idx++;
-    } else if (char === "8" || char === "9") {
+    } else if (char === '8' || char === '9') {
       isOctal = false;
       idx++;
     } else if (isIdentifierPart(char.charCodeAt(0))) {
@@ -102,23 +109,24 @@ function readLegacyOctalLiteral(stream) {
     char = stream.peek(idx);
   }
 
-  if (!isOctal) return new NumericToken({
-    value: parseNumeric(stream, idx, 10),
-    octal: true,
-    noctal: !isOctal
-  });
+  if (!isOctal)
+    return new NumericToken({
+      value: parseNumeric(stream, idx, 10),
+      octal: true,
+      noctal: !isOctal,
+    });
 
   return new NumericToken({
     value: parseNumeric(stream, idx, 8),
     octal: true,
-    noctal: !isOctal
+    noctal: !isOctal,
   });
 }
 
 function readOctalLiteral(stream) {
-  let start, idx = start = 2, char = stream.peek(idx);
-  while (!isEOS(char)) {
-    if ("0" <= char && char <= "7") {
+  let start, idx = (start = 2), char = stream.peek(idx);
+  while (!terminates(char) && !isEOS(char)) {
+    if ('0' <= char && char <= '7') {
       char = stream.peek(++idx);
     } else if (isIdentifierPart(char.charCodeAt(0))) {
       throw this.createILLEGAL(char);
@@ -132,16 +140,16 @@ function readOctalLiteral(stream) {
   }
 
   return new NumericToken({
-    value: parseNumeric(stream, idx, 8, start)
+    value: parseNumeric(stream, idx, 8, start),
   });
 }
 
 function readBinaryLiteral(stream) {
-  let start, idx = start = 2;
+  let start, idx = (start = 2);
   let char = stream.peek(idx);
 
-  while(!isEOS(char)) {
-    if (char !== "0" && char !== "1") {
+  while (!terminates(char) && !isEOS(char)) {
+    if (char !== '0' && char !== '1') {
       break;
     }
     char = stream.peek(idx);
@@ -152,18 +160,22 @@ function readBinaryLiteral(stream) {
     throw this.createILLEGAL(char);
   }
 
-  if (!isEOS(char) && (isIdentifierStart(char) || isDecimalChar(char))) {
+  if (
+    !isEOS(char) &&
+    !terminates(char) &&
+    (isIdentifierStart(char) || isDecimalChar(char))
+  ) {
     throw this.createILLEGAL(char);
   }
 
   return new NumericToken({
-    value: parseNumeric(stream, idx, 2, start)
+    value: parseNumeric(stream, idx, 2, start),
   });
 }
 
 function readHexLiteral(stream) {
-  let start, idx = start = 2, char = stream.peek(idx);
-  while(true) {
+  let start, idx = (start = 2), char = stream.peek(idx);
+  while (!terminates(char)) {
     let hex = getHexValue(char);
     if (hex === -1) {
       break;
@@ -175,16 +187,16 @@ function readHexLiteral(stream) {
     throw this.createILLEGAL(char);
   }
 
-  if (!isEOS(char) && isIdentifierStart(char)) {
+  if (!isEOS(char) && !terminates(char) && isIdentifierStart(char)) {
     throw this.createILLEGAL(char);
   }
 
   return new NumericToken({
-    value: parseNumeric(stream, idx, 16, start)
+    value: parseNumeric(stream, idx, 16, start),
   });
 }
 
-function parseNumeric(stream, len, radix, start=0) {
+function parseNumeric(stream, len, radix, start = 0) {
   stream.readString(start);
   return parseInt(stream.readString(len - start), radix);
 }

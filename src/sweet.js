@@ -1,61 +1,51 @@
 // @flow
-import { List } from "immutable";
-import reduce from "shift-reducer";
-import ParseReducer from "./parse-reducer";
-import codegen, { FormattedCodeGen } from "shift-codegen";
+import type SweetLoader from './sweet-loader';
+import { transform as babel } from 'babel-core';
 
-import BindingMap from "./binding-map.js";
+type CompileOptions = {
+  refererName?: string,
+  debugStore?: Map<string, string>,
+  noBabel?: boolean,
+  loader: SweetLoader,
+};
 
-import Term from "./terms";
-import { Modules } from './modules';
-
-// not available in browser
-
-import { transform as babelTransform } from "babel-core";
-import nodeResolver from "./node-module-resolver";
-import nodeLoader from "./node-module-loader";
-
-type CodeOutput = {
-  code: string
+function compileModule(
+  entryPath: string,
+  loader: SweetLoader,
+  refererName?: string,
+) {
+  return loader.compile(entryPath, refererName);
 }
 
-type SweetOptions = {
-  includeImports?: boolean;
-  cwd?: string;
-  enforcePragma?: boolean;
-  filename?: string;
-  transform?: (s: string) => { code: string };
+export function parse(
+  entryPath: string,
+  loader: SweetLoader,
+  options?: CompileOptions,
+) {
+  let refererName;
+  if (options != null) {
+    refererName = options.refererName;
+  }
+  return compileModule(entryPath, loader, refererName).parse();
 }
 
-export function expand(source: string, options: SweetOptions = {}): any {
-  let bindings = new BindingMap();
-  let modules = new Modules({
-    bindings,
-    cwd: options.cwd || process.cwd(),
-    filename: options.filename,
-    transform: options.transform || babelTransform || function(c) {
-      return {code: c};
-    },
-    moduleResolver: options.moduleResolver || nodeResolver,
-    moduleLoader: options.moduleLoader || nodeLoader
-  });
-  let compiledMod = modules.compileEntrypoint(source, options.filename, options.enforcePragma);
-  let nativeImports = compiledMod.importEntries.filter(imp => !modules.has(imp.moduleSpecifier.val()));
-  return new Term("Module", {
-    directives: List(),
-    items: nativeImports.concat(compiledMod.body).concat(compiledMod.exportEntries.interpose(new Term('EmptyStatement', {})))
-  });
-}
-
-export function parse(source: string, options: SweetOptions, includeImports: boolean = true): any {
-  return reduce(new ParseReducer({phase: 0}), expand(source, options).gen(includeImports));
-}
-
-export function compile(source: string, options: SweetOptions = {}): CodeOutput {
-  let ast = parse(source, options, options.includeImports);
-  let gen = codegen(ast, new FormattedCodeGen());
-  return options.transform && (!options.noBabel) ? options.transform(gen, {
+export function compile(
+  entryPath: string,
+  loader: SweetLoader,
+  options?: CompileOptions,
+) {
+  let refererName, noBabel = true;
+  if (options != null) {
+    refererName = options.refererName;
+    noBabel = options.noBabel;
+  }
+  let code = compileModule(entryPath, loader, refererName).codegen();
+  if (noBabel) {
+    return {
+      code,
+    };
+  }
+  return babel(code, {
     babelrc: true,
-    filename: options.filename
-  }) : { code: gen };
+  });
 }

@@ -1,12 +1,13 @@
-import { Symbol } from "./symbol";
+// @flow
+import { Symbol } from './symbol';
 
 let scopeIndex = 0;
 
-export function freshScope(name = "scope") {
+export function freshScope(name: string = 'scope') {
   scopeIndex++;
-  return Symbol(name + "_" + scopeIndex);
+  return Symbol(name + '_' + scopeIndex);
 }
 
-export function Scope(name) {
+export function Scope(name: string) {
   return Symbol(name);
 }

@@ -1,7 +1,6 @@
-import TermExpander from "./term-expander.js";
+import TermExpander from './term-expander.js';
 import TokenExpander from './token-expander';
 import * as _ from 'ramda';
-
 
 export default class Compiler {
   constructor(phase, env, store, context) {
@@ -12,20 +11,21 @@ export default class Compiler {
   }
 
   compile(stxl) {
-    let tokenExpander = new TokenExpander(_.merge(this.context, {
-      phase: this.phase,
-      env: this.env,
-      store: this.store
-    }));
-    let termExpander = new TermExpander(_.merge(this.context, {
-      phase: this.phase,
-      env: this.env,
-      store: this.store
-    }));
+    let tokenExpander = new TokenExpander(
+      _.merge(this.context, {
+        phase: this.phase,
+        env: this.env,
+        store: this.store,
+      }),
+    );
+    let termExpander = new TermExpander(
+      _.merge(this.context, {
+        phase: this.phase,
+        env: this.env,
+        store: this.store,
+      }),
+    );
 
-    return _.pipe(
-      _.bind(tokenExpander.expand, tokenExpander),
-      _.map(t => termExpander.expand(t))
-    )(stxl);
+    return tokenExpander.expand(stxl).map(t => termExpander.expand(t));
   }
 }

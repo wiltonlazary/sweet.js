@@ -1,49 +1,62 @@
 // @flow
 
-import { EmptyReadtable } from './readtable';
-import readDelimiter from './read-delimiter';
-import { LSYNTAX, RSYNTAX } from './utils';
+import { getCurrentReadtable, setCurrentReadtable } from 'readtable';
 import { List } from 'immutable';
-import { getSlice } from './token-reader';
-import Syntax from '../syntax';
-import { EmptyToken } from '../tokens';
-import { skipSingleLineComment } from './utils';
+import { TokenType as TT } from '../tokens';
 
-import type CharStream from './char-stream';
+import type { CharStream } from 'readtable';
 
-const dispatchReadtable = EmptyReadtable.extendReadtable({
+const backtickEntry = {
   key: '`',
-  action: function readSyntaxTemplate(stream: CharStream, prefix: List<Syntax>, exprAllowed: boolean, dispatchKey: string): List<Syntax> {
-    // return read('syntaxTemplate').first().token;
-    // TODO: Can we simply tack 'syntaxTemplate' on the front and process it as a
-    //       syntax macro?
-    let startLocation = Object.assign({}, this.locationInfo, stream.sourceInfo);
-    const opening = new Syntax({
-      type: LSYNTAX,
-      value: `${dispatchKey}${stream.readString()}`,
-      slice: getSlice(stream, startLocation)
-    }, this.context);
-    const result = readDelimiter.call(this, '`', stream, List(), true);
+  mode: 'terminating',
+  action: function readBacktick(
+    stream: CharStream,
+    prefix: List<any>,
+    e: boolean,
+  ) {
+    if (prefix.isEmpty()) {
+      return {
+        type: TT.LSYNTAX,
+        value: stream.readString(),
+      };
+    }
 
-    startLocation = Object.assign({}, this.locationInfo, stream.sourceInfo);
-    const closing = new Syntax({
-      type: RSYNTAX,
+    return {
+      type: TT.RSYNTAX,
       value: stream.readString(),
-      slice: getSlice(stream, startLocation)
-    }, this.context);
-    return result.unshift(opening).push(closing);
-  }
-}, {
-  action: function readDefault(stream: CharStream, prefix: List<Syntax>, exprAllowed: boolean, dispatchKey: string): typeof EmptyToken {
-    // treating them as single line comments
-    skipSingleLineComment.call(this, stream);
-    return EmptyToken;
-  }
-});
+    };
+  },
+};
 
-export default function readDispatch(stream: CharStream, prefix: List<Syntax>, exprAllowed: boolean): List<Syntax> | typeof EmptyToken {
-  const dispatchKey = stream.readString();
-  const dispatchEntry = dispatchReadtable.getEntry(stream.peek());
-  const result = dispatchEntry.action.call(this, stream, prefix, exprAllowed, dispatchKey);
+export function readSyntaxTemplate(
+  stream: CharStream,
+  prefix: List<any>,
+  exprAllowed: boolean,
+  dispatchChar: string,
+): List<any> | { type: typeof TT.RSYNTAX, value: string } {
+  // return read('syntaxTemplate').first().token;
+  // TODO: Can we simply tack 'syntaxTemplate' on the front and process it as a
+  //       syntax macro?
+  const prevTable = getCurrentReadtable();
+  setCurrentReadtable(prevTable.extend(backtickEntry));
+
+  const result = this.readUntil(
+    '`',
+    stream,
+    List.of(
+      updateSyntax(dispatchChar, this.readToken(stream, List(), exprAllowed)),
+    ),
+    exprAllowed,
+  );
+
+  setCurrentReadtable(prevTable);
   return result;
+}
+
+function updateSyntax(prefix, token) {
+  token.value = prefix + token.value;
+  token.slice.text = prefix + token.slice.text;
+  token.slice.start -= 1;
+  token.slice.startLocation.position -= 1;
+  return token;
 }

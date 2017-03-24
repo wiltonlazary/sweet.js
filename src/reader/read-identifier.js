@@ -2,38 +2,38 @@
 
 import { scanUnicode } from './utils';
 
-import { isEOS } from './char-stream';
-import type CharStream from './char-stream';
-
-import { code } from 'esutils';
+import { isEOS, getCurrentReadtable } from 'readtable';
+import type { CharStream } from 'readtable';
 
 import { IdentifierToken } from '../tokens';
 
-import { isIdentifierPart, isIdentifierStart } from './utils';
+import { isTerminating, isIdentifierPart, isIdentifierStart } from './utils';
 
+let terminates;
 
 export default function readIdentifier(stream: CharStream) {
+  terminates = isTerminating(getCurrentReadtable());
   let char = stream.peek();
   let code;
   let check = isIdentifierStart;
   let idx = 0;
-  while(!isEOS(char)) {
+  while (!terminates(char) && !isEOS(char)) {
     code = char.charCodeAt(0);
-    if (char === '\\' || 0xD800 <= code && code <= 0xDBFF) {
+    if (char === '\\' || (0xd800 <= code && code <= 0xdbff)) {
       return new IdentifierToken({
-        value: getEscapedIdentifier.call(this, stream)
+        value: getEscapedIdentifier.call(this, stream),
       });
     }
     if (!check(code)) {
       return new IdentifierToken({
-        value: stream.readString(idx)
+        value: stream.readString(idx),
       });
     }
     char = stream.peek(++idx);
     check = isIdentifierPart;
   }
   return new IdentifierToken({
-    value: stream.readString(idx)
+    value: stream.readString(idx),
   });
 }
 
@@ -43,7 +43,7 @@ function getEscapedIdentifier(stream) {
   let check = isIdentifierStart;
   let char = sPeek();
   let code = char.charCodeAt(0);
-  while (!isEOS(char)) {
+  while (!terminates(char) && !isEOS(char)) {
     let streamRead = false;
     if (char === '\\') {
       let nxt = sPeek(1);
@@ -58,16 +58,17 @@ function getEscapedIdentifier(stream) {
       if (code < 0) {
         throw this.createILLEGAL(char);
       }
-    } else if (0xD800 <= code && code <= 0xDBFF) {
+    } else if (0xd800 <= code && code <= 0xdbff) {
       if (isEOS(char)) {
         throw this.createILLEGAL(char);
       }
       let lowSurrogateCode = sPeek(1).charCodeAt(0);
-      if (0xDC00 > lowSurrogateCode || lowSurrogateCode > 0xDFFF) {
+      if (0xdc00 > lowSurrogateCode || lowSurrogateCode > 0xdfff) {
         throw this.createILLEGAL(char);
       }
       stream.readString(2);
       code = decodeUtf16(code, lowSurrogateCode);
+      streamRead = true;
     }
     if (!check(code)) {
       if (id.length < 1) {
@@ -87,6 +88,5 @@ function getEscapedIdentifier(stream) {
 }
 
 function decodeUtf16(lead, trail) {
-  return (lead - 0xD800) * 0x400 + (trail - 0xDC00) + 0x10000;
+  return (lead - 0xd800) * 0x400 + (trail - 0xdc00) + 0x10000;
 }
-

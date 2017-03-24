@@ -3,175 +3,45 @@ import { List } from 'immutable';
 import { Enforester } from './enforester';
 import { ALL_PHASES } from './syntax';
 import * as _ from 'ramda';
+import ScopeReducer from './scope-reducer';
+import * as T from 'sweet-spec';
+import Term, * as S from 'sweet-spec';
+import Syntax from './syntax';
+import { isTemplate, isDelimiter, getKind } from './tokens';
+import type { TokenTree } from './tokens';
 
-const symWrap = Symbol('wrapper');
+export function wrapInTerms(stx: List<TokenTree>): List<Term> {
+  return stx.map(s => {
+    if (isTemplate(s)) {
+      if (s.items) {
+        s.items = wrapInTerms(s.items);
+        return new T.RawSyntax({
+          value: new Syntax(s),
+        });
+      }
+      return new T.RawSyntax({
+        value: new Syntax(s),
+      });
+    } else if (isDelimiter(s)) {
+      return new S.RawDelimiter({
+        kind: getKind(s),
+        inner: wrapInTerms(s),
+      });
+    }
+    return new S.RawSyntax({
+      value: new Syntax(s),
+    });
+  });
+}
+
 const privateData = new WeakMap();
-
-const getVal = t => {
-  if (t.match("delimiter")) {
-    return null;
-  }
-  if (typeof t.val === 'function') {
-    return t.val();
-  }
-  return null;
-};
-
-export class SyntaxOrTermWrapper {
-  constructor(s, context = {}) {
-    this[symWrap] = s;
-    this.context = context;
-  }
-
-  from(type, value) {
-    let stx = this[symWrap];
-    if (typeof stx.from === 'function') {
-      return stx.from(type, value);
-    }
-  }
-  fromNull() {
-    return this.from("null", null);
-  }
-
-  fromNumber(value) {
-    return this.from('number', value);
-  }
-
-  fromString(value) {
-    return this.from("string", value);
-  }
-
-  fromPunctuator(value) {
-    return this.from("punctuator", value);
-  }
-
-  fromKeyword(value) {
-    return this.from("keyword", value);
-  }
-
-  fromIdentifier(value) {
-    return this.from("identifier", value);
-  }
-
-  fromRegularExpression(value) {
-    return this.from("regularExpression", value);
-  }
-
-  fromBraces(inner) {
-    return this.from("braces", inner);
-  }
-
-  fromBrackets(inner) {
-    return this.from("brackets", inner);
-  }
-
-  fromParens(inner) {
-    return this.from("parens", inner);
-  }
-
-  match(type, value) {
-    let stx = this[symWrap];
-    if (typeof stx.match === 'function') {
-      return stx.match(type, value);
-    }
-  }
-
-  isIdentifier(value) {
-    return this.match("identifier", value);
-  }
-
-  isAssign(value) {
-    return this.match("assign", value);
-  }
-
-  isBooleanLiteral(value) {
-    return this.match("boolean", value);
-  }
-
-  isKeyword(value) {
-    return this.match("keyword", value);
-  }
-
-  isNullLiteral(value) {
-    return this.match("null", value);
-  }
-
-  isNumericLiteral(value) {
-    return this.match("number", value);
-  }
-
-  isPunctuator(value) {
-    return this.match("punctuator", value);
-  }
-
-  isStringLiteral(value) {
-    return this.match("string", value);
-  }
-
-  isRegularExpression(value) {
-    return this.match("regularExpression", value);
-  }
-
-  isTemplate(value) {
-    return this.match("template", value);
-  }
-
-  isDelimiter(value) {
-    return this.match("delimiter", value);
-  }
-
-  isParens(value) {
-    return this.match("parens", value);
-  }
-
-  isBraces(value) {
-    return this.match("braces", value);
-  }
-
-  isBrackets(value) {
-    return this.match("brackets", value);
-  }
-
-  isSyntaxTemplate(value) {
-    return this.match("syntaxTemplate", value);
-  }
-
-  isEOF(value) {
-    return this.match("eof", value);
-  }
-
-  lineNumber() {
-    return this[symWrap].lineNumber();
-  }
-
-  val() {
-    return getVal(this[symWrap]);
-  }
-
-  inner() {
-    let stx = this[symWrap];
-    if (!stx.match("delimiter")) {
-      throw new Error('Can only get inner syntax on a delimiter');
-    }
-
-    let enf = new Enforester(stx.inner(), List(), this.context);
-    return new MacroContext(enf, 'inner', this.context);
-  }
-}
-
-export function unwrap(x) {
-  if (x instanceof SyntaxOrTermWrapper) {
-    return x[symWrap];
-  }
-  return x;
-}
 
 function cloneEnforester(enf) {
   const { rest, prev, context } = enf;
   return new Enforester(rest, prev, context);
 }
 
-function Marker () {}
+function Marker() {}
 
 /*
 ctx :: {
@@ -180,7 +50,6 @@ ctx :: {
 }
 */
 export default class MacroContext {
-
   constructor(enf, name, context, useScope, introducedScope) {
     const startMarker = new Marker();
     const startEnf = cloneEnforester(enf);
@@ -206,22 +75,36 @@ export default class MacroContext {
   }
 
   name() {
-    const { name, context } = privateData.get(this);
-    return new SyntaxOrTermWrapper(name, context);
+    const { name } = privateData.get(this);
+    return name;
+  }
+
+  contextify(delim: any) {
+    if (!(delim instanceof T.RawDelimiter)) {
+      throw new Error(`Can only contextify a delimiter but got ${delim}`);
+    }
+    const { context } = privateData.get(this);
+
+    let enf = new Enforester(
+      delim.inner.slice(1, delim.inner.size - 1),
+      List(),
+      context,
+    );
+    return new MacroContext(enf, 'inner', context);
   }
 
   expand(type) {
-    const { enf, context } = privateData.get(this);
+    const { enf } = privateData.get(this);
     if (enf.rest.size === 0) {
       return {
         done: true,
-        value: null
+        value: null,
       };
     }
     enf.expandMacro();
     let originalRest = enf.rest;
     let value;
-    switch(type) {
+    switch (type) {
       case 'AssignmentExpression':
       case 'expr':
         value = enf.enforestExpressionLoop();
@@ -251,13 +134,18 @@ export default class MacroContext {
       case 'ReturnStatement':
       case 'ExpressionStatement':
         value = enf.enforestStatement();
-        expect(_.whereEq({type}, value), `Expecting a ${type}`, value, originalRest);
+        expect(
+          _.whereEq({ type }, value),
+          `Expecting a ${type}`,
+          value,
+          originalRest,
+        );
         break;
       case 'YieldExpression':
         value = enf.enforestYieldExpression();
         break;
       case 'ClassExpression':
-        value = enf.enforestClass({isExpr: true});
+        value = enf.enforestClass({ isExpr: true });
         break;
       case 'ArrowExpression':
         value = enf.enforestArrowExpression();
@@ -287,14 +175,19 @@ export default class MacroContext {
       case 'CompoundAssignmentExpression':
       case 'ConditionalExpression':
         value = enf.enforestExpressionLoop();
-        expect(_.whereEq({type}, value), `Expecting a ${type}`, value, originalRest);
+        expect(
+          _.whereEq({ type }, value),
+          `Expecting a ${type}`,
+          value,
+          originalRest,
+        );
         break;
       default:
         throw new Error('Unknown term type: ' + type);
     }
     return {
       done: false,
-      value: new SyntaxOrTermWrapper(value, context)
+      value: value,
     };
   }
 
@@ -303,7 +196,7 @@ export default class MacroContext {
     if (priv.markers.get(priv.startMarker) === enf) {
       return priv.enf.rest;
     }
-    throw Error("Unauthorized access!");
+    throw Error('Unauthorized access!');
   }
 
   reset(marker) {
@@ -348,22 +241,34 @@ export default class MacroContext {
   }
 
   next() {
-    const { enf, noScopes, useScope, introducedScope, context } = privateData.get(this);
+    const {
+      enf,
+      noScopes,
+      useScope,
+      introducedScope,
+      context,
+    } = privateData.get(this);
     if (enf.rest.size === 0) {
       return {
         done: true,
-        value: null
+        value: null,
       };
     }
     let value = enf.advance();
     if (!noScopes) {
-      value = value
-        .addScope(useScope, context.bindings, ALL_PHASES)
-        .addScope(introducedScope, context.bindings, ALL_PHASES, { flip: true });
+      value = value.reduce(
+        new ScopeReducer(
+          [
+            { scope: useScope, phase: ALL_PHASES, flip: false },
+            { scope: introducedScope, phase: ALL_PHASES, flip: true },
+          ],
+          context.bindings,
+        ),
+      );
     }
     return {
       done: false,
-      value: new SyntaxOrTermWrapper(value, context)
+      value: value,
     };
   }
 }

@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/sweet-js/sweet.js.png)](https://travis-ci.org/sweet-js/sweet.js)
+[![Build Status](https://travis-ci.org/sweet-js/sweet.js.svg)](https://travis-ci.org/sweet-js/sweet.js)
 
 [![Join the chat at https://gitter.im/mozilla/sweet.js](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/mozilla/sweet.js?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
@@ -38,4 +38,4 @@ console.log('hello, world!')
 * Read the [reference documentation](http://sweetjs.org/doc/1.0/reference.html).
 * Play with the [editor](http://sweetjs.org/browser/editor.html).
 * Discuss on [Google Groups](https://groups.google.com/forum/#!forum/sweetjs).
-* Hang out on IRC: #sweet.js at irc.mozilla.org.
+* Hang out on IRC: #sweet.js at irc.mozilla.org and on [Gitter](https://gitter.im/sweet-js/sweet.js).

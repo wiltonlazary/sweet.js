@@ -1,10 +1,9 @@
-import { parse, compile } from "../src/sweet";
-import expect from "expect.js";
-import { zip, curry, equals, cond, identity, T, and, compose, type, mapObjIndexed, map, keys, has } from 'ramda';
-import { transform } from 'babel-core';
-import read from "../src/reader/token-reader";
-import { Enforester } from "../src/enforester";
-import { List } from "immutable";
+import { List } from 'immutable';
+
+import read from '../src/reader/token-reader';
+import { compile, parse } from '../src/sweet';
+import { Enforester } from '../src/enforester';
+import StoreLoader from '../src/store-loader';
 
 export const stmt = x => x.items[0];
 export const expr = x => stmt(x).expression;
@@ -15,61 +14,85 @@ export function makeEnforester(code) {
   return new Enforester(stxl, List(), {});
 }
 
-export function testParseFailure() {
-  // TODO
+function getAst(code) {
+  const store = new Map();
+  store.set('main.js', code);
+
+  const loader = new StoreLoader(__dirname, store);
+  return parse('main.js', loader);
 }
 
-function testParseWithOpts(code, acc, expectedAst, options) {
-  let parsedAst = parse(code, options, options.includeImports);
-  let isString = (x) => type(x) === 'String';
-  let isObject = (x) => type(x) === 'Object';
-  let isArray = (x) => type(x) === 'Array';
-
-  function checkObjects(expected, actual) {
-    let checkWithHygiene = cond([
-      [and(isString, equals('<<hygiene>>')), curry((a, b) => true)],
-      [isObject, curry((a, b) => checkObjects(a, b))],
-      [isArray, curry((a, b) => (expect(b).to.have.length(a.length), map(([a, b]) => checkObjects(a, b), zip(a, b))))],
-      [T, curry((a, b) => expect(b).to.be(a))]
-    ]);
-
-    mapObjIndexed((prop, key, ob) => {
-      let checker = checkWithHygiene(prop);
-      expect(actual).to.have.property(key);
-      checker(actual[key]);
-    }, expected);
-  }
+function testParseWithOpts(t, acc, code, expectedAst) {
   try {
-    checkObjects(expectedAst, acc(parsedAst));
+    t.deepEqual(expectedAst, acc(getAst(code)));
   } catch (e) {
     throw new Error(e.message);
   }
 }
 
-
-export function testParse(code, acc, expectedAst, loader = {}) {
-  return testParseWithOpts(code, acc, expectedAst, {
-    loc: false,
-    moduleResolver: x => x,
-    moduleLoader: path => loader[path],
-    includeImports: true
-  });
+export function testParse(t, acc, code, expectedAst) {
+  return testParseWithOpts(t, acc, code, expectedAst);
 }
 
-export function testEval(source, expectedOutput, loader) {
-  let result = compile(source, {
-    cwd: '.',
-    transform,
-    moduleResolver: x => x,
-    moduleLoader: path => loader[path],
-    includeImports: false
-  });
+export function testParseComparison(t, acc, codeA, codeB) {
+  testParse(t, acc, codeA, acc(getAst(codeB)));
+}
+
+export function testParseFailure() {
+  // TODO
+}
+
+export function testEval(store, cb) {
+  let loader = new StoreLoader(__dirname, store);
+  let result = compile('main.js', loader).code;
+
   var output;
-  eval(result.code);
-  expect(output).to.eql(expectedOutput);
+  try {
+    eval(result);
+  } catch (e) {
+    throw new Error(
+      `Syntax error: ${e.message}
+
+${result}`,
+    );
+  }
+  return cb(output);
 }
 
+export function evalWithStore(t, inputStore, expected) {
+  let store = new Map();
+  for (let key of Object.keys(inputStore)) {
+    store.set(key, inputStore[key]);
+  }
+  testEval(store, output => t.is(output, expected));
+}
+evalWithStore.title = (title, inputStore, expected) =>
+  `${title}
+${Array.from(Object.entries(inputStore))
+    .map(([modName, modSrc]) => `${modName}\n----\n${modSrc}\n----`)
+    .join('\n')}
+> ${expected}`;
+
+export function evalWithOutput(t, input, expected) {
+  let store = new Map();
+  store.set('main.js', input);
+  testEval(store, output => t.is(output, expected));
+}
+evalWithOutput.title = (title, input, expected) =>
+  `${title}
+${input}
+> ${expected}`;
+
+export function evalThrows(t, input) {
+  let store = new Map();
+  store.set('main.js', input);
+  t.throws(() => testEval(store, () => {}));
+}
+evalThrows.title = (title, input) =>
+  `${title}
+${input}
+> should have thrown`;
 
 export function testThrow(source) {
-  expect(() => compile(source, { cwd: '.', transform})).to.throwError();
+  // expect(() => compile(source, { cwd: '.', transform})).to.throwError();
 }

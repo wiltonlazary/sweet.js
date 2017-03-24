@@ -1,11 +1,9 @@
 // @flow
 
-import Reader, { getCurrentReadtable, setCurrentReadtable } from './reader';
+import { CharStream, isEOS, Reader, setCurrentReadtable } from 'readtable';
 import defaultReadtable from './default-readtable';
 import { List } from 'immutable';
-import CharStream, { isEOS } from './char-stream';
-import { TokenType, EmptyToken } from '../tokens';
-import Syntax from '../syntax';
+import { EmptyToken } from '../tokens';
 
 import type { StartLocation, Slice } from '../tokens';
 
@@ -13,20 +11,23 @@ setCurrentReadtable(defaultReadtable);
 
 export type LocationInfo = {
   line: number,
-  column: number
+  column: number,
 };
 
 type Context = {
   bindings: any,
-  scopesets: any
+  scopesets: any,
 };
 
-export function getSlice(stream: CharStream, startLocation: StartLocation): Slice {
+export function getSlice(
+  stream: CharStream,
+  startLocation: StartLocation,
+): Slice {
   return {
     text: stream.getSlice(startLocation.position),
     start: startLocation.position,
     startLocation,
-    end: stream.sourceInfo.position
+    end: stream.sourceInfo.position,
   };
 }
 
@@ -37,7 +38,14 @@ class ReadError extends Error {
   line: number;
   column: number;
   message: string;
-  constructor({ index, line, column, message }: { index: number, line: number, column: number, message: string }) {
+  constructor(
+    {
+      index,
+      line,
+      column,
+      message,
+    }: { index: number, line: number, column: number, message: string },
+  ) {
     super(message);
     this.index = index;
     this.line = line;
@@ -55,37 +63,68 @@ class TokenReader extends Reader {
     streams.set(this, stream);
     this.locationInfo = {
       line: 1,
-      column: 1
+      column: 1,
     };
   }
 
   createError(msg: string): ReadError {
-    let message = msg.replace(/\{(\d+)\}/g, (_, n) => JSON.stringify(arguments[+n + 1]));
-    return new ReadError({ message,
-                           index: streams.get(this).sourceInfo.position,
-                           line: this.locationInfo.line,
-                           column: this.locationInfo.column });
+    let message = msg.replace(/\{(\d+)\}/g, (_, n) =>
+      JSON.stringify(arguments[+n + 1]));
+    return new ReadError({
+      message,
+      // $FlowFixMe: decide on how to handle possible nullability
+      index: streams.get(this).sourceInfo.position,
+      line: this.locationInfo.line,
+      column: this.locationInfo.column,
+    });
   }
 
   createILLEGAL(char) {
     return !isEOS(char)
-      ? this.createError("Unexpected {0}", char)
-    : this.createError("Unexpected end of input");
+      ? this.createError('Unexpected {0}', char)
+      : this.createError('Unexpected end of input');
   }
 
-  readToken(stream: CharStream, prefix: List<Syntax>, exprAllowed: boolean): Syntax {
-    const startLocation = Object.assign({}, this.locationInfo, stream.sourceInfo);
-    const result = super.read(stream, prefix, exprAllowed);
+  readToken(stream: CharStream, ...rest: Array<any>) {
+    const startLocation = Object.assign(
+      {},
+      this.locationInfo,
+      stream.sourceInfo,
+    );
+    const result = super.read(stream, ...rest);
 
-    if (startLocation.column === this.locationInfo.column && startLocation.line === this.locationInfo.line) {
-      this.locationInfo.column += stream.sourceInfo.position - startLocation.position;
+    if (
+      startLocation.column === this.locationInfo.column &&
+      startLocation.line === this.locationInfo.line
+    ) {
+      this.locationInfo.column += stream.sourceInfo.position -
+        startLocation.position;
     }
 
     if (result === EmptyToken) return result;
 
     if (!List.isList(result)) result.slice = getSlice(stream, startLocation);
 
-    return new Syntax(result, this.context);
+    return result;
+  }
+
+  readUntil(
+    close: ?Function | ?string,
+    stream: CharStream,
+    prefix: List<any>,
+    exprAllowed: boolean,
+  ): List<any> {
+    let result, results = prefix, done = false;
+    do {
+      if (isEOS(stream.peek())) break;
+      done = typeof close === 'function' ? close() : stream.peek() === close;
+      result = this.readToken(stream, results, exprAllowed);
+
+      if (result !== EmptyToken) {
+        results = results.push(result);
+      }
+    } while (!done);
+    return results;
   }
 
   incrementLine(): void {
@@ -94,10 +133,16 @@ class TokenReader extends Reader {
   }
 }
 
-export default function read(source: string | CharStream, context?: Context): List<Syntax> {
-  const stream = (typeof source === 'string') ? new CharStream(source) : source;
-  const reader = new TokenReader(stream, context);
-  const entry = getCurrentReadtable().getEntry('');
-
-  return entry.action.call(reader, stream, List(), false);
+export default function read(
+  source: string | CharStream,
+  context?: Context,
+): List<any> {
+  const stream = typeof source === 'string' ? new CharStream(source) : source;
+  if (isEOS(stream.peek())) return List();
+  return new TokenReader(stream, context).readUntil(
+    null,
+    stream,
+    List(),
+    false,
+  );
 }
