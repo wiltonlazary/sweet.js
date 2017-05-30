@@ -16,6 +16,7 @@ import Syntax from './syntax.js';
 import ScopeReducer from './scope-reducer';
 import ModuleVisitor, { bindImports } from './module-visitor';
 
+// $FlowFixMe: flow doesn't know about the CloneReducer yet
 class RegisterBindingsReducer extends Term.CloneReducer {
   useScope: any;
   phase: number;
@@ -47,12 +48,14 @@ class RegisterBindingsReducer extends Term.CloneReducer {
       skipDup: this.skipDup,
     });
     this.env.set(newBinding.toString(), new VarBindingTransform(newName));
+    // $FlowFixMe: flow doesn't know about extend
     return t.extend({
       name: newName,
     });
   }
 }
 
+// $FlowFixMe: flow doesn't know about the CloneReducer yet
 class RegisterSyntaxBindingsReducer extends Term.CloneReducer {
   useScope: any;
   phase: number;
@@ -79,6 +82,7 @@ class RegisterSyntaxBindingsReducer extends Term.CloneReducer {
     });
     let resolvedName = newName.resolve(this.phase);
     this.env.set(resolvedName, new CompiletimeTransform(this.val));
+    // $FlowFixMe: flow doesn't know about extend
     return t.extend({
       name: newName,
     });
@@ -91,7 +95,7 @@ export default class TokenExpander extends ASTDispatcher {
     this.context = context;
   }
 
-  expand(stxl: List<Syntax>) {
+  expand(stxl: List<Term>) {
     let result = [];
     if (stxl.size === 0) {
       return List(result);
@@ -107,6 +111,7 @@ export default class TokenExpander extends ASTDispatcher {
   }
 
   expandVariableDeclarationStatement(term: S.VariableDeclarationStatement) {
+    // $FlowFixMe: flow doesn't know about extend
     return term.extend({
       declaration: this.registerVariableDeclaration(term.declaration),
     });
@@ -132,11 +137,13 @@ export default class TokenExpander extends ASTDispatcher {
         mod,
         this.context.phase + 1,
         this.context.store,
+        mod.path,
       );
       this.context.store = visitor.invoke(
         mod,
         this.context.phase + 1,
         this.context.store,
+        mod.path,
       );
     } else {
       mod = this.context.loader.get(path, this.context.phase, this.context.cwd);
@@ -144,6 +151,7 @@ export default class TokenExpander extends ASTDispatcher {
         mod,
         this.context.phase,
         this.context.store,
+        mod.path,
       );
     }
     bindImports(term, mod, this.context.phase, this.context);
@@ -158,7 +166,7 @@ export default class TokenExpander extends ASTDispatcher {
     return this.registerImport(term);
   }
 
-  expandExport(term: Term) {
+  expandExport(term: any) {
     if (
       T.isFunctionDeclaration(term.declaration) ||
       T.isClassDeclaration(term.declaration)
@@ -174,7 +182,7 @@ export default class TokenExpander extends ASTDispatcher {
     return term;
   }
 
-  registerFunctionOrClass(term: Term) {
+  registerFunctionOrClass(term: any) {
     let red = new RegisterBindingsReducer(
       this.context.useScope,
       this.context.phase,
@@ -187,8 +195,12 @@ export default class TokenExpander extends ASTDispatcher {
     });
   }
 
-  registerVariableDeclaration(term: Term) {
-    if (term.kind === 'syntax' || term.kind === 'syntaxrec') {
+  registerVariableDeclaration(term: any) {
+    if (
+      term.kind === 'syntax' ||
+      term.kind === 'syntaxrec' ||
+      term.kind === 'operator'
+    ) {
       return this.registerSyntaxDeclaration(term);
     }
     let red = new RegisterBindingsReducer(
@@ -207,8 +219,8 @@ export default class TokenExpander extends ASTDispatcher {
     });
   }
 
-  registerSyntaxDeclaration(term: Term) {
-    if (term.kind === 'syntax') {
+  registerSyntaxDeclaration(term: any) {
+    if (term.kind === 'syntax' || term.kind === 'operator') {
       // syntax id^{a, b} = <init>^{a, b}
       // ->
       // syntaxrec id^{a,b,c} = function() { return <<id^{a}>> }
@@ -245,6 +257,7 @@ export default class TokenExpander extends ASTDispatcher {
     }
     // for syntax declarations we need to load the compiletime value
     // into the environment
+    let compiletimeType = term.kind === 'operator' ? 'operator' : 'syntax';
     return term.extend({
       declarators: term.declarators.map(decl => {
         // each compiletime value needs to be expanded with a fresh
@@ -269,7 +282,12 @@ export default class TokenExpander extends ASTDispatcher {
           this.context.phase,
           this.context.bindings,
           this.context.env,
-          val,
+          {
+            type: compiletimeType,
+            prec: decl.prec == null ? void 0 : decl.prec.val(),
+            assoc: decl.assoc == null ? void 0 : decl.assoc.val(),
+            f: val,
+          },
         );
         return decl.extend({ binding: decl.binding.reduce(red), init });
       }),

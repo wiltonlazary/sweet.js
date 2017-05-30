@@ -1,1 +1,4 @@
-return function foo () {} /42/i
+// @flow
+import { RawDelimiter } from 'sweet-spec';
+
+let t = new RawDelimiter();

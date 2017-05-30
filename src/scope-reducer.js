@@ -4,6 +4,7 @@ import type Syntax from './syntax';
 import type { SymbolClass } from './symbol';
 import type BindingMap from './binding-map';
 
+// $FlowFixMe: flow doesn't know about the CloneReducer yet
 export default class extends Term.CloneReducer {
   scopes: Array<{ scope: SymbolClass, phase: number | {}, flip: boolean }>;
   bindings: BindingMap;
@@ -18,14 +19,11 @@ export default class extends Term.CloneReducer {
   }
 
   applyScopes(s: Syntax) {
-    return this.scopes.reduce(
-      (acc, sc) => {
-        return acc.addScope(sc.scope, this.bindings, sc.phase, {
-          flip: sc.flip,
-        });
-      },
-      s,
-    );
+    return this.scopes.reduce((acc, sc) => {
+      return acc.addScope(sc.scope, this.bindings, sc.phase, {
+        flip: sc.flip,
+      });
+    }, s);
   }
 
   reduceBindingIdentifier(t: Term, s: { name: Syntax }) {

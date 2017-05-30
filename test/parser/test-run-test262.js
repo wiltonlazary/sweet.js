@@ -7,35 +7,22 @@ import NodeLoader from '../../src/node-loader';
 // TODO: make these pass
 const passExcluded = [
   // known problems with the reader
-  '1252.script.js',
-  '978.script.js',
+  '1252.script.js', // Invalid test. U+180e isn't considered whitespace anymore
+
+  // sweet doesn't currently support script tags
   '953.script.js',
   '952.script.js',
   '951.script.js',
-  '950.script.js',
   '949.script.js',
-  '947.script.js',
-  '669.script.js',
-  '582.script.js',
-  '348.script.js',
   '315.script.js',
-  '314.script.js',
   '311.script.js',
   '299.script.js',
-  '211.script.js',
-  '210.script.js',
   '1657.script.js',
   '1656.script.js',
   '1655.script.js',
   '1654.script.js',
-  '1328.script.js',
 
-  '1012.script.js',
   '1057.module.js',
-  '106.script.js',
-  '1073.script.js',
-  '1074.script.js',
-  '1077.script.js',
   '1116.module.js',
   '1117.module.js',
   '1118.module.js',
@@ -48,61 +35,11 @@ const passExcluded = [
   '1125.module.js',
   '1126.module.js',
   '1127.module.js',
-  '1128.script.js',
-  '1129.script.js',
-  '1130.script.js',
-  '1131.script.js',
-  '1138.script.js',
-  '1166.script.js',
-  '117.script.js',
-  '1202.script.js',
-  '1239.script.js',
-  '1240.script.js',
-  '1245.script.js',
-  '1246.script.js',
-  '1247.script.js',
-  '1248.script.js',
-  '128.script.js',
-  '1307.script.js',
-  '1319.script.js',
-  '1334.script.js',
-  '1335.script.js',
-  '1364.script.js',
-  '1370.script.js',
-  '140.script.js',
-  '1427.script.js',
-  '1428.script.js',
-  '1429.script.js',
-  '1430.script.js',
-  '1431.script.js',
-  '1432.script.js',
-  '1434.script.js',
-  '1467.script.js',
-  '1623.script.js',
-  '1638.script.js',
   '1686.module.js',
   '1687.module.js',
   '1688.module.js',
   '1689.module.js',
   '1692.module.js',
-  '1736.script.js',
-  '1739.script.js',
-  '1745.script.js',
-  '1779.script.js',
-  '1789.script.js',
-  '1844.script.js',
-  '1954.script.js',
-  '285.script.js',
-  '290.script.js',
-  '295.script.js',
-  '296.script.js',
-  '297.script.js',
-  '301.script.js',
-  '350.script.js',
-  '37.script.js',
-  '389.script.js',
-  '391.script.js',
-  '393.script.js',
   '412.module.js',
   '414.module.js',
   '415.module.js',
@@ -111,23 +48,61 @@ const passExcluded = [
   '418.module.js',
   '419.module.js',
   '420.module.js',
-  '516.script.js',
   '523.module.js',
+
+  '1012.script.js',
+  '1073.script.js',
+  '1074.script.js',
+  '1077.script.js',
+  '1128.script.js',
+  '1129.script.js',
+  '1130.script.js',
+  '1131.script.js',
+  '1138.script.js',
+  '1166.script.js',
+  '1202.script.js',
+  '1239.script.js',
+  '1240.script.js',
+  '1245.script.js',
+  '1246.script.js',
+  '1247.script.js',
+  '1248.script.js',
+  '1307.script.js',
+  '1319.script.js',
+  '1364.script.js',
+  '1370.script.js',
+  '1427.script.js',
+  '1428.script.js',
+  '1429.script.js',
+  '1430.script.js',
+  '1431.script.js',
+  '1432.script.js',
+  '1434.script.js',
+  '1638.script.js',
+  '1736.script.js',
+  '1739.script.js',
+  '1745.script.js',
+  '1779.script.js',
+  '1844.script.js',
+  '285.script.js',
+  '295.script.js',
+  '296.script.js',
+  '301.script.js',
+  '350.script.js',
+  '516.script.js',
   '533.script.js',
   '538.script.js',
-  '572.script.js',
-  '583.script.js',
-  '608.script.js',
-  '679.script.js',
   '680.script.js',
   '681.script.js',
-  '84.script.js',
-  '95.script.js',
-  '993.script.js',
-  '995.script.js',
+  '995.script.js'
 ];
 
 const failExcluded = [
+  // TODO: remove the following three after transform destructuring refactor
+  '160.script.js',
+  '822.script.js',
+  '833.script.js',
+
   '0.script.js',
   '19.script.js',
   '22.script.js',
@@ -212,10 +187,8 @@ const failExcluded = [
   '223.script.js',
   '235.script.js',
   '236.script.js',
-  '245.script.js',
   '246.script.js',
   '247.script.js',
-  '259.script.js',
   '260.script.js',
   '266.script.js',
   '267.script.js',
@@ -223,6 +196,7 @@ const failExcluded = [
   '269.script.js',
   '270.script.js',
   '271.script.js',
+  '273.script.js', // not throwing on erroneous '*'
   '274.script.js',
   '276.script.js',
   '288.script.js',
@@ -346,8 +320,6 @@ const failExcluded = [
   '658.script.js',
   '689.script.js',
   '690.script.js',
-  '691.script.js',
-  '692.script.js',
   '693.script.js',
 
   '694.script.js', // this test #= (something that COULD pass depending on readtable)
@@ -432,29 +404,11 @@ const failExcluded = [
   '912.module.js',
   '913.module.js',
   '924.module.js',
-  '965.module.js',
-
-  // these tests hang
-  '15.script.js',
-  '16.script.js',
-  '233.script.js',
-  '287.script.js',
-  '472.script.js',
-  '498.script.js',
-  '499.script.js',
-  '558.script.js',
-  '559.script.js',
-  '560.script.js',
-  '561.script.js',
-  '562.script.js',
-  '570.script.js',
-  '581.script.js',
-  '657.script.js',
-  '681.script.js',
-  '682.script.js',
+  '965.module.js'
 ];
 
-const earlyExcluded = [ // eslint-disable-line no-unused-vars
+// eslint-disable-next-line no-unused-vars
+const earlyExcluded = [
   '5.script.js',
   '6.script.js',
   '7.script.js',
@@ -701,7 +655,7 @@ const earlyExcluded = [ // eslint-disable-line no-unused-vars
   '535.module.js',
   '536.module.js',
   '537.module.js',
-  '538.module.js',
+  '538.module.js'
 ];
 
 const PARSER_TEST_DIR = 'test262-parser-tests';
@@ -716,14 +670,14 @@ function mkTester(subdir, testDir) {
   function f(t, fname) {
     let result = compile(
       `./${testDir}/${subdir}/${fname}`,
-      new NodeLoader(__dirname),
+      new NodeLoader(__dirname)
     );
     t.not(result, null);
   }
   f.title = (title, fname, expected) => {
     let src = fs.readFileSync(
       `./test/parser/${testDir}/${subdir}/${fname}`,
-      'utf8',
+      'utf8'
     );
     return `${fname}:
 ${src}
@@ -735,12 +689,13 @@ ${src}
 function mkFailTester(subdir, testDir) {
   function f(t, fname) {
     t.throws(() =>
-      compile(`./${testDir}/${subdir}/${fname}`, new NodeLoader(__dirname)));
+      compile(`./${testDir}/${subdir}/${fname}`, new NodeLoader(__dirname))
+    );
   }
   f.title = (title, fname, expected) => {
     let src = fs.readFileSync(
       `./test/parser/${testDir}/${subdir}/${fname}`,
-      'utf8',
+      'utf8'
     );
     return `${fname}:
 ${src}

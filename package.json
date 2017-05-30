@@ -1,11 +1,8 @@
 {
-  "name": "sweet.js",
+  "name": "@sweet-js/core",
   "description": "Hygienic Macros for JavaScript",
   "main": "dist/sweet.js",
-  "bin": {
-    "sjs": "bin/sjs"
-  },
-  "version": "2.2.1",
+  "version": "3.0.7",
   "engines": {
     "node": ">=7.0.0"
   },
@@ -16,18 +13,14 @@
       "url": "http://github.com/sweet-js/sweet.js/master/LICENSE.BSD"
     }
   ],
-  "browser": {
-    "babel-core": false
-  },
   "scripts": {
-    "clean": "rm -rf build",
+    "clean": "rm -rf dist",
     "lint": "eslint src test && flow",
     "format": "prettier-eslint --write \"src/**/*.js\" \"test/**/*.js\"",
     "precommit": "lint-staged",
-    "prebuild": "mkdir -p build/test build/sweet dist/",
-    "build:src": "babel --out-dir build/src src",
-    "build:browser": "webpack build/src/browser-sweet.js --output-library-target amd --output-library sweet",
-    "build": "npm run build:src && npm run build:browser",
+    "prebuild": "mkdir -p dist/",
+    "build:src": "babel --out-dir dist/ src --plugins transform-es2015-modules-commonjs",
+    "build": "npm run build:src",
     "preprofile": "npm run build",
     "profile": "node --prof profile.js && node --prof-process *v8.log > v8-processed.log && rm *v8.log",
     "pretest": "npm run lint",
@@ -35,8 +28,7 @@
     "test:ci": "npm run pretest && ava && ava test/parser/test-*.js",
     "test": "ava",
     "report": "nyc ava && nyc report--reporter=html",
-    "docs": "asciidoctorjs doc/1.0/tutorial.adoc & asciidoctorjs doc/1.0/reference.adoc",
-    "dist": "rsync -r build/src/ dist"
+    "prepublish": "npm run build"
   },
   "lint-staged": {
     "*.js": [
@@ -44,12 +36,17 @@
       "git add"
     ]
   },
+  "files": [
+    "dist", "helpers.js"
+  ],
   "directories": {
     "test": "test"
   },
   "dependencies": {
     "babel-core": "^6.18.0",
-    "immutable": "^3.7.4",
+    "immutable": "^3.8.1",
+    "prettier": "^1.1.0",
+    "prettier-eslint": "^5.1.0",
     "ramda": "^0.22.0",
     "ramda-fantasy": "^0.6.0",
     "readtable": "^0.0.1",
@@ -59,18 +56,16 @@
     "shift-js": "^0.2.1",
     "shift-reducer": "^3.0.2",
     "shift-spidermonkey-converter": "^1.0.0",
-    "sweet-spec": "3.0.0",
+    "sweet-spec": "3.1.1",
     "transit-js": "^0.8.846",
-    "utils-dirname": "^1.0.0",
-    "yargs": "^4.3.2"
+    "utils-dirname": "^1.0.0"
   },
   "devDependencies": {
     "angular": "1.6.0",
-    "asciidoctor-cli": "^1.5.2-alpha.3",
-    "asciidoctor.js": "^1.5.4",
     "ava": "^0.18.2",
     "babel-cli": "^6.18.0",
     "babel-eslint": "^7.0.0",
+    "babel-plugin-transform-es2015-modules-commonjs": "^6.24.1",
     "babel-plugin-transform-flow-strip-types": "^6.14.0",
     "babel-preset-node7": "1.4.0",
     "babel-register": "6.18.0",
@@ -78,7 +73,7 @@
     "eslint-plugin-flowtype": "^2.11.4",
     "event-stream": "^3.3.2",
     "expect.js": "0.3.x",
-    "flow-bin": "^0.39.0",
+    "flow-bin": "^0.45.0",
     "husky": "^0.13.2",
     "jquery": "3.1.1",
     "lint-staged": "^3.3.1",
@@ -99,7 +94,9 @@
   "license": "BSD-2-Clause",
   "ava": {
     "babel": "inherit",
-    "files": [ "test/unit/*.js" ],
+    "files": [
+      "test/unit/*.js"
+    ],
     "require": [
       "babel-register"
     ]

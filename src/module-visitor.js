@@ -14,18 +14,18 @@ import codegen, { FormattedCodeGen } from 'shift-codegen';
 import type { Context } from './sweet-loader';
 
 export function bindImports(
-  impTerm: T.ImportDeclaration,
+  impTerm: any,
   exModule: SweetModule,
   phase: any,
   context: Context,
 ) {
   let names = [];
   let phaseToBind = impTerm.forSyntax ? phase + 1 : phase;
-  if (impTerm.defaultBinding != null) {
+  if (impTerm.defaultBinding != null && impTerm instanceof T.Import) {
+    let name = impTerm.defaultBinding.name;
     let exportName = exModule.exportedNames.find(
       exName => exName.exportedName.val() === '_default',
     );
-    let name = impTerm.defaultBinding.name;
     if (exportName != null) {
       let newBinding = gensym('_default');
       let toForward = exportName.exportedName;
@@ -74,35 +74,43 @@ export default class {
     this.context = context;
   }
 
-  visit(mod: SweetModule, phase: any, store: any) {
+  visit(mod: SweetModule, phase: any, store: any, cwd: string) {
     mod.imports.forEach(imp => {
       if (imp.forSyntax) {
         let mod = this.context.loader.get(
           imp.moduleSpecifier.val(),
           phase + 1,
-          '',
+          cwd,
         );
-        this.visit(mod, phase + 1, store);
-        this.invoke(mod, phase + 1, store);
+        this.visit(mod, phase + 1, store, mod.path);
+        this.invoke(mod, phase + 1, store, mod.path);
       } else {
-        let mod = this.context.loader.get(imp.moduleSpecifier.val(), phase, '');
-        this.visit(mod, phase, store);
+        let mod = this.context.loader.get(
+          imp.moduleSpecifier.val(),
+          phase,
+          cwd,
+        );
+        this.visit(mod, phase, store, mod.path);
       }
       bindImports(imp, mod, phase, this.context);
     });
     for (let term of mod.compiletimeItems()) {
       if (S.isSyntaxDeclarationStatement(term)) {
-        this.registerSyntaxDeclaration(term.declaration, phase, store);
+        this.registerSyntaxDeclaration((term: any).declaration, phase, store);
       }
     }
     return store;
   }
 
-  invoke(mod: any, phase: any, store: any) {
+  invoke(mod: any, phase: any, store: any, cwd: string) {
     mod.imports.forEach(imp => {
       if (!imp.forSyntax) {
-        let mod = this.context.loader.get(imp.moduleSpecifier.val(), phase, '');
-        this.invoke(mod, phase, store);
+        let mod = this.context.loader.get(
+          imp.moduleSpecifier.val(),
+          phase,
+          cwd,
+        );
+        this.invoke(mod, phase, store, mod.path);
         bindImports(imp, mod, phase, this.context);
       }
     });
@@ -117,6 +125,7 @@ export default class {
     let parsed = new T.Module({
       directives: List(),
       items,
+      // $FlowFixMe: flow doesn't know about reduce yet
     }).reduce(new SweetToShiftReducer(phase));
 
     let gen = codegen(parsed, new FormattedCodeGen());
@@ -127,7 +136,7 @@ export default class {
   }
 
   registerSyntaxDeclaration(
-    term: T.VariableDeclarationStatement,
+    term: T.VariableDeclaration,
     phase: any,
     store: any,
   ) {
@@ -151,7 +160,10 @@ export default class {
           });
         }
         let resolvedName = stx.resolve(phase);
-        store.set(resolvedName, new CompiletimeTransform(val));
+        store.set(
+          resolvedName,
+          new CompiletimeTransform({ type: 'syntax', f: val }),
+        );
       });
     });
   }

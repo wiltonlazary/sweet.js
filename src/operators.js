@@ -10,29 +10,29 @@ const unaryOperators = {
   delete: true,
 };
 const binaryOperatorPrecedence = {
-  '*': 13,
-  '/': 13,
-  '%': 13,
-  '+': 12,
-  '-': 12,
-  '>>': 11,
-  '<<': 11,
-  '>>>': 11,
-  '<': 10,
-  '<=': 10,
-  '>': 10,
-  '>=': 10,
-  in: 10,
-  instanceof: 10,
-  '==': 9,
-  '!=': 9,
-  '===': 9,
-  '!==': 9,
-  '&': 8,
-  '^': 7,
-  '|': 6,
-  '&&': 5,
-  '||': 4,
+  '*': 14,
+  '/': 14,
+  '%': 14,
+  '+': 13,
+  '-': 13,
+  '>>': 12,
+  '<<': 12,
+  '>>>': 12,
+  '<': 11,
+  '<=': 11,
+  '>': 11,
+  '>=': 11,
+  in: 11,
+  instanceof: 11,
+  '==': 10,
+  '!=': 10,
+  '===': 10,
+  '!==': 10,
+  '&': 9,
+  '^': 8,
+  '|': 7,
+  '&&': 6,
+  '||': 5,
 };
 
 var operatorAssoc = {
@@ -77,16 +77,18 @@ export function getOperatorAssoc(op) {
 }
 
 export function isUnaryOperator(op) {
-  return (op.match('punctuator') ||
-    op.match('identifier') ||
-    op.match('keyword')) &&
-    unaryOperators.hasOwnProperty(op.val());
+  return (
+    (op.match('punctuator') || op.match('identifier') || op.match('keyword')) &&
+    unaryOperators.hasOwnProperty(op.val())
+  );
 }
 
 export function isOperator(op) {
   if (op.match('punctuator') || op.match('identifier') || op.match('keyword')) {
-    return binaryOperatorPrecedence.hasOwnProperty(op) ||
-      unaryOperators.hasOwnProperty(op.val());
+    return (
+      binaryOperatorPrecedence.hasOwnProperty(op) ||
+      unaryOperators.hasOwnProperty(op.val())
+    );
   }
   return false;
 }

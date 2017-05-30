@@ -5,13 +5,16 @@ import { dirname } from 'path';
 import resolve from 'resolve';
 import vm from 'vm';
 import Store from './store';
+import type { LoaderOptions } from './sweet-loader';
+
+type NodeLoaderOptions = LoaderOptions & { extensions?: Array<string> };
 
 export default class NodeLoader extends SweetLoader {
-  extensions: ?(string[]);
+  extensions: Array<string>;
 
-  constructor(baseDir: string, extensions?: string[]) {
-    super(baseDir);
-    this.extensions = extensions;
+  constructor(baseDir: string, options: NodeLoaderOptions = {}) {
+    super(baseDir, options);
+    this.extensions = options.extensions || ['.js', '.mjs'];
   }
 
   normalize(name: string, refererName?: string, refererAddress?: string) {
@@ -20,20 +23,18 @@ export default class NodeLoader extends SweetLoader {
     if (match && match.length >= 3) {
       let resolvedName = resolve.sync(match[1], {
         basedir: refererName ? dirname(refererName) : this.baseDir,
-        extensions: this.extensions ? this.extensions : ['.js'],
+        extensions: this.extensions,
       });
       return `${resolvedName}:${match[2]}`;
     }
     throw new Error(`Module ${name} is missing phase information`);
   }
 
-  fetch(
-    {
-      name,
-      address,
-      metadata,
-    }: { name: string, address: { path: string, phase: number }, metadata: {} },
-  ) {
+  fetch({
+    name,
+    address,
+    metadata,
+  }: { name: string, address: { path: string, phase: number }, metadata: {} }) {
     let src = this.sourceCache.get(address.path);
     if (src != null) {
       return src;

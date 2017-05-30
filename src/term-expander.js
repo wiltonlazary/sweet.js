@@ -200,7 +200,7 @@ export default class TermExpander extends ASTDispatcher {
       : this.expand(term.restElement);
     return new T.ArrayBinding({
       elements: term.elements
-        .map(t => t == null ? null : this.expand(t))
+        .map(t => (t == null ? null : this.expand(t)))
         .toArray(),
       restElement,
     });
@@ -289,7 +289,8 @@ export default class TermExpander extends ASTDispatcher {
           [{ scope, phase: ALL_PHASES, flip: false }],
           this.context.bindings,
         ),
-      ));
+      ),
+    );
     bodyTerm = new T.Block({
       statements: compiler.compile(markedBody),
     });
@@ -374,7 +375,7 @@ export default class TermExpander extends ASTDispatcher {
 
   expandArrayExpression(term) {
     return new T.ArrayExpression({
-      elements: term.elements.map(t => t == null ? t : this.expand(t)),
+      elements: term.elements.map(t => (t == null ? t : this.expand(t))),
     });
   }
 
@@ -436,7 +437,11 @@ export default class TermExpander extends ASTDispatcher {
   }
 
   expandVariableDeclaration(term) {
-    if (term.kind === 'syntax' || term.kind === 'syntaxrec') {
+    if (
+      term.kind === 'syntax' ||
+      term.kind === 'syntaxrec' ||
+      term.kind === 'operator'
+    ) {
       return term;
     }
     return new T.VariableDeclaration({
@@ -453,6 +458,9 @@ export default class TermExpander extends ASTDispatcher {
     let lookahead = enf.peek();
     let t = enf.enforestExpression();
     if (t == null || enf.rest.size > 0) {
+      if (enf.rest.size === 0) {
+        throw enf.createError(')', 'unexpected token');
+      }
       throw enf.createError(lookahead, 'unexpected syntax');
     }
     return this.expand(t);

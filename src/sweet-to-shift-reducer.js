@@ -1,8 +1,15 @@
 // @flow
 import Term, * as S from 'sweet-spec';
+import { complement } from 'ramda';
 import { List } from 'immutable';
+
+import { isEmptyStatement } from './terms';
+
 import type Syntax from './syntax.js';
 
+const notEmptyStatement = complement(isEmptyStatement);
+
+// $FlowFixMe: flow doesn't know about CloneReducer yet
 export default class extends Term.CloneReducer {
   phase: number;
 
@@ -14,7 +21,7 @@ export default class extends Term.CloneReducer {
   reduceModule(t: Term, s: { directives: List<any>, items: List<any> }) {
     return new S.Module({
       directives: s.directives.toArray(),
-      items: s.items.toArray(),
+      items: s.items.toArray().filter(notEmptyStatement),
     });
   }
 
@@ -49,12 +56,16 @@ export default class extends Term.CloneReducer {
   ) {
     return new S.FunctionBody({
       directives: s.directives.toArray(),
-      statements: s.statements.toArray(),
+      statements: s.statements.toArray().filter(notEmptyStatement),
     });
   }
 
-  reduceVariableDeclarationStatement(t: Term, s: { declaration: any }) {
-    if (t.declaration.kind === 'syntax' || t.declaration.kind === 'syntaxrec') {
+  reduceVariableDeclarationStatement(t: any, s: { declaration: any }) {
+    if (
+      t.declaration.kind === 'syntax' ||
+      t.declaration.kind === 'syntaxrec' ||
+      t.declaration.kind === 'operator'
+    ) {
       return new S.EmptyStatement();
     }
     return new S.VariableDeclarationStatement({
@@ -88,7 +99,7 @@ export default class extends Term.CloneReducer {
 
   reduceBlock(t: Term, s: { statements: List<any> }) {
     return new S.Block({
-      statements: s.statements.toArray(),
+      statements: s.statements.toArray().filter(notEmptyStatement),
     });
   }
 }

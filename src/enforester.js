@@ -18,6 +18,7 @@ import {
   ConstDeclTransform,
   SyntaxDeclTransform,
   SyntaxrecDeclTransform,
+  OperatorDeclTransform,
   ReturnStatementTransform,
   WhileTransform,
   IfTransform,
@@ -62,7 +63,7 @@ const EXPR_LOOP_OPERATOR = {};
 const EXPR_LOOP_NO_CHANGE = {};
 const EXPR_LOOP_EXPANSION = {};
 
-function getLineNumber(x: Syntax | T.Term) {
+function getLineNumber(x: any) {
   let stx;
   if (x instanceof Syntax) {
     stx = x;
@@ -129,12 +130,6 @@ export class Enforester {
 
     if (this.rest.size === 0) {
       this.done = true;
-      return this.term;
-    }
-
-    if (this.isEOF(this.peek())) {
-      this.term = new T.EOF({});
-      this.advance();
       return this.term;
     }
 
@@ -223,7 +218,8 @@ export class Enforester {
       this.isLetDeclTransform(lookahead) ||
       this.isConstDeclTransform(lookahead) ||
       this.isSyntaxrecDeclTransform(lookahead) ||
-      this.isSyntaxDeclTransform(lookahead)
+      this.isSyntaxDeclTransform(lookahead) ||
+      this.isOperatorDeclTransform(lookahead)
     ) {
       return new T.Export({
         declaration: this.enforestVariableDeclaration(),
@@ -472,7 +468,8 @@ export class Enforester {
         this.isLetDeclTransform(lookahead) ||
         this.isConstDeclTransform(lookahead) ||
         this.isSyntaxrecDeclTransform(lookahead) ||
-        this.isSyntaxDeclTransform(lookahead))
+        this.isSyntaxDeclTransform(lookahead) ||
+        this.isOperatorDeclTransform(lookahead))
     ) {
       let stmt = new T.VariableDeclarationStatement({
         declaration: this.enforestVariableDeclaration(),
@@ -828,12 +825,10 @@ export class Enforester {
     });
   }
 
-  enforestClass(
-    {
-      isExpr = false,
-      inDefault = false,
-    }: { isExpr?: boolean, inDefault?: boolean },
-  ) {
+  enforestClass({
+    isExpr = false,
+    inDefault = false,
+  }: { isExpr?: boolean, inDefault?: boolean }) {
     let kw = this.matchRawSyntax();
     let name = null, supr = null;
 
@@ -864,7 +859,11 @@ export class Enforester {
 
       let isStatic = false;
       let { methodOrKey, kind } = enf.enforestMethodDefinition();
-      if (kind === 'identifier' && methodOrKey.value.val() === 'static') {
+      if (
+        kind === 'identifier' &&
+        methodOrKey instanceof T.StaticPropertyName &&
+        methodOrKey.value.val() === 'static'
+      ) {
         isStatic = true;
         ({ methodOrKey, kind } = enf.enforestMethodDefinition());
       }
@@ -905,8 +904,15 @@ export class Enforester {
   enforestObjectBinding() {
     let enf = new Enforester(this.matchCurlies(), List(), this.context);
     let properties = [];
+
+    //TODO: implement object rest operator when it lands
     while (enf.rest.size !== 0) {
       properties.push(enf.enforestBindingProperty());
+
+      if (enf.rest.size > 0 && !enf.isPunctuator(enf.peek(), ',')) {
+        throw enf.createError(enf.peek(), 'unexpected token');
+      }
+
       enf.consumeComma();
     }
 
@@ -949,21 +955,32 @@ export class Enforester {
     let enf = new Enforester(bracket, List(), this.context);
     let elements = [], restElement = null;
     while (enf.rest.size !== 0) {
-      let el;
-      if (enf.isPunctuator(enf.peek(), ',')) {
-        enf.consumeComma();
-        el = null;
-      } else {
+      let el = null;
+      if (!enf.isPunctuator(enf.peek(), ',')) {
         if (enf.isPunctuator(enf.peek(), '...')) {
           enf.advance();
           restElement = enf.enforestBindingTarget();
-          break;
+          if (enf.rest.size > 0) {
+            throw enf.createError(
+              enf.rest.first(),
+              'Rest element must be last element in array',
+            );
+          }
         } else {
           el = enf.enforestBindingElement();
+
+          if (el == null) {
+            throw enf.createError(enf.peek(), 'expected expression');
+          }
+          if (enf.rest.size > 0 && !enf.isPunctuator(enf.peek(), ',')) {
+            throw enf.createError(enf.peek(), 'unexpected token');
+          }
         }
+      }
+      if (restElement == null) {
+        elements.push(el);
         enf.consumeComma();
       }
-      elements.push(el);
     }
     return new T.ArrayBinding({
       elements: List(elements),
@@ -1042,45 +1059,36 @@ export class Enforester {
 
   enforestVariableDeclaration() {
     let kind;
-    let lookahead = this.matchRawSyntax();
-    let kindSyn = lookahead;
-    let phase = this.context.phase;
+    let lookahead = this.advance();
 
-    if (
-      kindSyn &&
-      this.context.env.get(kindSyn.resolve(phase)) === VariableDeclTransform
-    ) {
+    if (this.isVarDeclTransform(lookahead)) {
       kind = 'var';
-    } else if (
-      kindSyn &&
-      this.context.env.get(kindSyn.resolve(phase)) === LetDeclTransform
-    ) {
+    } else if (this.isLetDeclTransform(lookahead)) {
       kind = 'let';
-    } else if (
-      kindSyn &&
-      this.context.env.get(kindSyn.resolve(phase)) === ConstDeclTransform
-    ) {
+    } else if (this.isConstDeclTransform(lookahead)) {
       kind = 'const';
-    } else if (
-      kindSyn &&
-      this.context.env.get(kindSyn.resolve(phase)) === SyntaxDeclTransform
-    ) {
+    } else if (this.isSyntaxDeclTransform(lookahead)) {
       kind = 'syntax';
-    } else if (
-      kindSyn &&
-      this.context.env.get(kindSyn.resolve(phase)) === SyntaxrecDeclTransform
-    ) {
+    } else if (this.isSyntaxrecDeclTransform(lookahead)) {
       kind = 'syntaxrec';
+    } else if (this.isOperatorDeclTransform(lookahead)) {
+      kind = 'operator';
     }
 
     let decls = List();
 
     while (true) {
       let term = this.enforestVariableDeclarator({
-        isSyntax: kind === 'syntax' || kind === 'syntaxrec',
+        isSyntax: kind === 'syntax' ||
+          kind === 'syntaxrec' ||
+          kind === 'operator',
+        isOperator: kind === 'operator',
       });
       let lookahead = this.peek();
-      decls = decls.concat(term);
+      // TODO: bug in immutable type definitions for concat,
+      // upgrade to v4 when it is released
+      // https://github.com/facebook/immutable-js/pull/1153
+      decls = decls.concat((term: any));
 
       if (this.isPunctuator(lookahead, ',')) {
         this.advance();
@@ -1095,18 +1103,42 @@ export class Enforester {
     });
   }
 
-  enforestVariableDeclarator({ isSyntax }: { isSyntax: boolean }) {
+  enforestVariableDeclarator({
+    isSyntax,
+    isOperator,
+  }: { isSyntax: boolean, isOperator: boolean }) {
     let id = this.enforestBindingTarget({ allowPunctuator: isSyntax });
-    let lookahead = this.peek();
+    const AssocValues = ['left', 'right', 'prefix', 'postfix'];
+
+    let assoc, prec;
+    if (isOperator) {
+      assoc = this.matchIdentifier();
+      if (AssocValues.indexOf(assoc.val()) === -1) {
+        throw this.createError(
+          this.peek(),
+          `Associativity must be one of ${AssocValues.join(',')}`,
+        );
+      }
+      prec = this.matchLiteral();
+    }
 
     let init;
-    if (this.isPunctuator(lookahead, '=')) {
+    if (this.isPunctuator(this.peek(), '=')) {
       this.advance();
       let enf = new Enforester(this.rest, List(), this.context);
       init = enf.enforest('expression');
       this.rest = enf.rest;
     } else {
       init = null;
+    }
+
+    if (isOperator) {
+      return new T.OperatorDeclarator({
+        binding: id,
+        init,
+        prec,
+        assoc,
+      });
     }
     return new T.VariableDeclarator({
       binding: id,
@@ -1172,7 +1204,7 @@ export class Enforester {
         // operator means an opCtx was pushed on the stack
         this.term = null;
       } else {
-        this.term = term;
+        this.term = (term: any); // TODO: don't overload the term's type with EXPR_LOOP_OPERATOR etc.
       }
     } while (true); // get a fixpoint
     return this.term;
@@ -1261,7 +1293,10 @@ export class Enforester {
     }
 
     // prefix unary
-    if (this.term === null && this.isOperator(lookahead)) {
+    if (
+      this.term === null &&
+      (this.isOperator(lookahead) || this.isCustomPrefixOperator(lookahead))
+    ) {
       return this.enforestUnaryExpression();
     }
 
@@ -1296,19 +1331,31 @@ export class Enforester {
       return this.enforestLeftHandSideExpression({ allowCall: true });
     }
 
-    // $x:id `...`
-    if (this.term && this.isTemplate(lookahead)) {
-      return this.enforestTemplateLiteral();
+    // $l:expr $op:binaryOperator $r:expr
+    if (this.term && this.isCustomBinaryOperator(lookahead)) {
+      return this.enforestBinaryExpression();
     }
 
     // postfix unary
-    if (this.term && this.isUpdateOperator(lookahead)) {
+    if (
+      this.term &&
+      (this.isUpdateOperator(lookahead) ||
+        this.isCustomPostfixOperator(lookahead))
+    ) {
       return this.enforestUpdateExpression();
     }
 
     // $l:expr $op:binaryOperator $r:expr
-    if (this.term && this.isOperator(lookahead)) {
+    if (
+      this.term &&
+      (this.isOperator(lookahead) || this.isCustomBinaryOperator(lookahead))
+    ) {
       return this.enforestBinaryExpression();
+    }
+
+    // $x:id `...`
+    if (this.term && this.isTemplate(lookahead)) {
+      return this.enforestTemplateLiteral();
     }
 
     // $x:expr = $init:expr
@@ -1404,6 +1451,9 @@ export class Enforester {
       this.term = this.enforestNewExpression();
     } else if (this.isThisTransform(lookahead)) {
       this.term = this.enforestThisExpression();
+    } else if (this.isBraces(lookahead)) {
+      this.term = this.enforestPrimaryExpression();
+      return this.term;
     }
 
     while (true) {
@@ -1434,8 +1484,6 @@ export class Enforester {
         this.term = this.enforestStaticMemberExpression();
       } else if (this.isTemplate(lookahead)) {
         this.term = this.enforestTemplateLiteral();
-      } else if (this.isBraces(lookahead)) {
-        this.term = this.enforestPrimaryExpression();
       } else if (this.isIdentifier(lookahead)) {
         if (this.term) break;
         this.term = new T.IdentifierExpression({
@@ -1558,7 +1606,7 @@ export class Enforester {
     });
   }
 
-  transformDestructuring(term: Term) {
+  transformDestructuring(term: any) {
     switch (term.type) {
       case 'IdentifierExpression':
         return new T.BindingIdentifier({ name: term.name });
@@ -1619,7 +1667,7 @@ export class Enforester {
     assert(false, 'not implemented yet for ' + term.type);
   }
 
-  transformDestructuringWithDefault(term: Term) {
+  transformDestructuringWithDefault(term: any) {
     switch (term.type) {
       case 'AssignmentExpression':
         return new T.BindingWithDefault({
@@ -1641,7 +1689,11 @@ export class Enforester {
   enforestArrowExpression() {
     let enf;
     if (this.isIdentifier(this.peek())) {
-      enf = new Enforester(List.of(this.advance()), List(), this.context);
+      enf = new Enforester(
+        List.of((this.advance(): any)),
+        List(),
+        this.context,
+      );
     } else {
       let p = this.matchParens();
       enf = new Enforester(p, List(), this.context);
@@ -1712,24 +1764,27 @@ export class Enforester {
 
     while (enf.rest.size > 0) {
       let lookahead = enf.peek();
-      if (enf.isPunctuator(lookahead, ',')) {
-        enf.advance();
-        elements.push(null);
-      } else if (enf.isPunctuator(lookahead, '...')) {
-        enf.advance();
-        let expression = enf.enforestExpressionLoop();
+      let expression = null;
+      if (!enf.isPunctuator(lookahead, ',')) {
+        let isSpread = false;
+        if (enf.isPunctuator(lookahead, '...')) {
+          enf.advance();
+          isSpread = true;
+        }
+        expression = enf.enforestExpressionLoop();
         if (expression == null) {
-          throw enf.createError(lookahead, 'expecting expression');
+          // this was a macro that expanded to nothing
+          continue;
         }
-        elements.push(new T.SpreadElement({ expression }));
-      } else {
-        let term = enf.enforestExpressionLoop();
-        if (term == null) {
-          throw enf.createError(lookahead, 'expected expression');
+        if (enf.rest.size > 0 && !enf.isPunctuator(enf.peek(), ',')) {
+          throw enf.createError(enf.peek(), 'unexpected token');
         }
-        elements.push(term);
-        enf.consumeComma();
+        if (isSpread) {
+          expression = new T.SpreadElement({ expression });
+        }
       }
+      enf.consumeComma();
+      elements.push(expression);
     }
 
     return new T.ArrayExpression({
@@ -1745,10 +1800,19 @@ export class Enforester {
     let enf = new Enforester(obj, List(), this.context);
 
     let lastProp = null;
+    //TODO: implement object spread operator when it lands
     while (enf.rest.size > 0) {
       let prop = enf.enforestPropertyDefinition();
+
+      if (enf.rest.size > 0 && !enf.isPunctuator(enf.peek(), ',')) {
+        throw enf.createError(enf.peek(), 'unexpected token');
+      }
+
       enf.consumeComma();
-      properties = properties.concat(prop);
+      // TODO: bug in immutable type definitions for concat,
+      // upgrade to v4 when it is released
+      // https://github.com/facebook/immutable-js/pull/1153
+      properties = properties.concat((prop: any));
 
       if (lastProp === prop) {
         throw enf.createError(prop, 'invalid syntax in object');
@@ -1777,7 +1841,7 @@ export class Enforester {
           });
         } else if (!this.isPunctuator(this.peek(), ':')) {
           return new T.ShorthandProperty({
-            name: methodOrKey.value,
+            name: (methodOrKey: any).value,
           });
         }
     }
@@ -1875,9 +1939,10 @@ export class Enforester {
     };
   }
 
-  enforestFunction(
-    { isExpr, inDefault }: { isExpr?: boolean, inDefault?: boolean },
-  ) {
+  enforestFunction({
+    isExpr,
+    inDefault,
+  }: { isExpr?: boolean, inDefault?: boolean }) {
     let name = null, params, body;
     let isGenerator = false;
     // eat the function keyword
@@ -1937,36 +2002,70 @@ export class Enforester {
   }
 
   enforestUpdateExpression() {
-    let operator = this.matchUnaryOperator();
-
+    const lookahead = this.peek();
+    const leftTerm = this.term;
+    if (!lookahead) {
+      throw this.createError(lookahead, 'assertion failure: operator is null');
+    }
+    let operator = this.matchRawSyntax();
+    if (this.isCompiletimeTransform(lookahead)) {
+      const operatorTransform = this.getFromCompiletimeEnvironment(operator);
+      if (!operatorTransform || operatorTransform.value.type !== 'operator') {
+        throw this.createError(lookahead, 'unexpected transform');
+      }
+      let result = operatorTransform.value.f.call(null, leftTerm);
+      let enf = new Enforester(result, List(), this.context);
+      return enf.enforestExpressionLoop();
+    }
     return new T.UpdateExpression({
       isPrefix: false,
       operator: operator.val(),
-      operand: this.transformDestructuring(this.term),
+      operand: this.transformDestructuring(leftTerm),
     });
   }
 
   enforestUnaryExpression() {
-    let operator = this.matchUnaryOperator();
+    const lookahead = this.peek();
+    if (!lookahead) {
+      throw this.createError(lookahead, 'assertion failure: operator is null');
+    }
+    let operator = this.matchRawSyntax();
+    let prec, combine;
+    if (this.isCompiletimeTransform(lookahead)) {
+      const operatorTransform = this.getFromCompiletimeEnvironment(lookahead);
+      if (!operatorTransform || operatorTransform.value.type !== 'operator') {
+        throw this.createError(lookahead, 'unexpected transform');
+      }
+      prec = operatorTransform.value.prec;
+      combine = rightTerm => {
+        return this.expandOperator(lookahead, operatorTransform, [rightTerm]);
+      };
+    } else {
+      // all builtins are 16
+      prec = 16;
+      combine = rightTerm => {
+        if (operator.val() === '++' || operator.val() === '--') {
+          return new T.UpdateExpression({
+            operator: operator.val(),
+            operand: this.transformDestructuring(rightTerm),
+            isPrefix: true,
+          });
+        } else {
+          return new T.UnaryExpression({
+            operator: operator.val(),
+            operand: rightTerm,
+          });
+        }
+      };
+    }
+
     this.opCtx.stack = this.opCtx.stack.push({
       prec: this.opCtx.prec,
       combine: this.opCtx.combine,
     });
-    // TODO: all builtins are 14, custom operators will change this
-    this.opCtx.prec = 14;
+    this.opCtx.prec = prec;
     this.opCtx.combine = rightTerm => {
-      if (operator.val() === '++' || operator.val() === '--') {
-        return new T.UpdateExpression({
-          operator: operator.val(),
-          operand: this.transformDestructuring(rightTerm),
-          isPrefix: true,
-        });
-      } else {
-        return new T.UnaryExpression({
-          operator: operator.val(),
-          operand: rightTerm,
-        });
-      }
+      return combine(rightTerm);
     };
     return EXPR_LOOP_OPERATOR;
   }
@@ -1997,28 +2096,41 @@ export class Enforester {
 
   enforestBinaryExpression() {
     let leftTerm = this.term;
-    let opStx = this.peek();
+    const opStx: any = this.peek();
+    if (!opStx) {
+      throw this.createError(opStx, 'assertion failure: opStx is null');
+    }
 
-    if (
-      opStx instanceof T.RawSyntax &&
-      operatorLt(
-        this.opCtx.prec,
-        getOperatorPrec(opStx.value.val()),
-        getOperatorAssoc(opStx.value.val()),
-      )
-    ) {
-      let op = opStx.value;
+    let prec, assoc, combine;
+    if (this.isCompiletimeTransform(this.peek())) {
+      const operatorTransform = this.getFromCompiletimeEnvironment(opStx.value);
+      if (!operatorTransform || operatorTransform.value.type !== 'operator') {
+        throw this.createError(opStx.value, 'unexpected transform');
+      }
+      prec = operatorTransform.value.prec;
+      assoc = operatorTransform.value.assoc;
+      combine = (left: any, right) => {
+        return this.expandOperator(opStx, operatorTransform, [left, right]);
+      };
+    } else {
+      prec = getOperatorPrec(opStx.value.val());
+      assoc = getOperatorAssoc(opStx.value.val());
+      combine = (left, right) =>
+        new T.BinaryExpression({
+          left,
+          right,
+          operator: opStx.value.val(),
+        });
+    }
+
+    if (operatorLt(this.opCtx.prec, prec, assoc)) {
       this.opCtx.stack = this.opCtx.stack.push({
         prec: this.opCtx.prec,
         combine: this.opCtx.combine,
       });
-      this.opCtx.prec = getOperatorPrec(op.val());
+      this.opCtx.prec = prec;
       this.opCtx.combine = rightTerm => {
-        return new T.BinaryExpression({
-          left: leftTerm,
-          operator: op.val(),
-          right: rightTerm,
-        });
+        return combine(leftTerm, rightTerm);
       };
       this.advance();
       return EXPR_LOOP_OPERATOR;
@@ -2062,10 +2174,10 @@ export class Enforester {
           name,
           `The macro ${name.resolve(this.context.phase)} does not have a bound value`,
         );
-      } else if (typeof syntaxTransform.value !== 'function') {
+      } else if (typeof syntaxTransform.value.f !== 'function') {
         throw this.createError(
           name,
-          `The macro ${name.resolve(this.context.phase)} was not bound to a callable value: ${syntaxTransform.value}`,
+          `The macro ${name.resolve(this.context.phase)} was not bound to a callable value: ${syntaxTransform.value.f}`,
         );
       }
       let useSiteScope = freshScope('u');
@@ -2082,7 +2194,7 @@ export class Enforester {
       );
 
       let result = sanitizeReplacementValues(
-        syntaxTransform.value.call(null, ctx),
+        syntaxTransform.value.f.call(null, ctx),
       );
       if (!List.isList(result)) {
         throw this.createError(
@@ -2099,6 +2211,7 @@ export class Enforester {
         if (terms instanceof Syntax) {
           return new T.RawSyntax({
             value: terms,
+            // $FlowFixMe: flow doesn't know about reduce on terms yet
           }).reduce(scopeReducer);
         } else if (!(terms instanceof Term)) {
           throw this.createError(
@@ -2112,6 +2225,49 @@ export class Enforester {
       this.rest = result.concat(ctx._rest(this));
       lookahead = this.peek();
     }
+  }
+
+  expandOperator(name: Term, operatorTransform: any, args: Array<Term>) {
+    let useSiteScope = freshScope('u');
+    let introducedScope = freshScope('i');
+    // TODO: needs to be a list of scopes I think
+    this.context.useScope = useSiteScope;
+    args = args.map(arg => {
+      // $FlowFixMe: flow doesn't know about reduce on terms yet
+      return arg.reduce(
+        new ScopeReducer(
+          [
+            { scope: useSiteScope, phase: ALL_PHASES, flip: false },
+            { scope: introducedScope, phase: ALL_PHASES, flip: true },
+          ],
+          this.context.bindings,
+        ),
+      );
+    });
+    let result = sanitizeReplacementValues(
+      operatorTransform.value.f.apply(null, args),
+    );
+    let scopeReducer = new ScopeReducer(
+      [{ scope: introducedScope, phase: ALL_PHASES, flip: true }],
+      this.context.bindings,
+      true,
+    );
+    result = result.map(terms => {
+      if (terms instanceof Syntax) {
+        return new T.RawSyntax({
+          value: terms,
+          // $FlowFixMe: flow doesn't know about reduce on terms yet
+        }).reduce(scopeReducer);
+      } else if (!(terms instanceof Term)) {
+        throw this.createError(
+          name,
+          'macro must return syntax objects or terms but got: ' + terms,
+        );
+      }
+      return terms.reduce(scopeReducer);
+    });
+    let enf = new Enforester(result, List(), this.context);
+    return enf.enforestExpressionLoop();
   }
 
   consumeSemicolon() {
@@ -2130,111 +2286,144 @@ export class Enforester {
     }
   }
 
-  safeCheck(obj: Syntax | Term, type: any, val: ?string = null) {
+  safeCheck(obj: ?(Syntax | Term), type: any, val: ?string = null) {
     if (obj instanceof Term) {
       if (obj instanceof T.RawSyntax) {
-        return obj.value &&
+        return (
+          obj.value &&
           (typeof obj.value.match === 'function'
             ? obj.value.match(type, val)
-            : false);
+            : false)
+        );
       } else if (obj instanceof T.RawDelimiter) {
         return type === 'delimiter' || obj.kind === type;
       }
     }
-    return obj &&
-      (typeof obj.match === 'function' ? obj.match(type, val) : false);
+    return (
+      obj && (typeof obj.match === 'function' ? obj.match(type, val) : false)
+    );
   }
 
   isTerm(term: any) {
     return term && term instanceof Term;
   }
 
-  isEOF(obj: Syntax | Term) {
+  isEOF(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'eof');
   }
 
-  isIdentifier(obj: Syntax | Term, val: ?string = null) {
+  isIdentifier(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'identifier', val);
   }
 
-  isPropertyName(obj: Syntax | Term) {
-    return this.isIdentifier(obj) ||
+  isPropertyName(obj: ?(Syntax | Term)) {
+    return (
+      this.isIdentifier(obj) ||
       this.isKeyword(obj) ||
       this.isNumericLiteral(obj) ||
       this.isStringLiteral(obj) ||
-      this.isBrackets(obj);
+      this.isBrackets(obj)
+    );
   }
 
-  isNumericLiteral(obj: Syntax | Term, val: ?string = null) {
+  isNumericLiteral(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'number', val);
   }
 
-  isStringLiteral(obj: Syntax | Term, val: ?string = null) {
+  isStringLiteral(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'string', val);
   }
 
-  isTemplate(obj: Syntax | Term, val: ?string = null) {
+  isTemplate(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'template', val);
   }
 
-  isSyntaxTemplate(obj: Syntax | Term) {
+  isSyntaxTemplate(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'syntaxTemplate');
   }
 
-  isBooleanLiteral(obj: Syntax | Term, val: ?string = null) {
+  isBooleanLiteral(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'boolean', val);
   }
 
-  isNullLiteral(obj: Syntax | Term, val: ?string = null) {
+  isNullLiteral(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'null', val);
   }
 
-  isRegularExpression(obj: Syntax | Term, val: ?string = null) {
+  isRegularExpression(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'regularExpression', val);
   }
 
-  isDelimiter(obj: Syntax | Term) {
+  isDelimiter(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'delimiter');
   }
 
-  isParens(obj: Syntax | Term) {
+  isParens(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'parens');
   }
 
-  isBraces(obj: Syntax | Term) {
+  isBraces(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'braces');
   }
 
-  isBrackets(obj: Syntax | Term) {
+  isBrackets(obj: ?(Syntax | Term)) {
     return this.safeCheck(obj, 'brackets');
   }
 
-  isAssign(obj: Syntax | Term, val: ?string = null) {
+  isAssign(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'assign', val);
   }
 
-  isKeyword(obj: Syntax | Term, val: ?string = null) {
+  isKeyword(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'keyword', val);
   }
 
-  isPunctuator(obj: Syntax | Term, val: ?string = null) {
+  isPunctuator(obj: ?(Syntax | Term), val: ?string = null) {
     return this.safeCheck(obj, 'punctuator', val);
   }
 
-  isOperator(obj: Syntax | Term) {
-    return (this.safeCheck(obj, 'punctuator') ||
-      this.safeCheck(obj, 'identifier') ||
-      this.safeCheck(obj, 'keyword')) &&
+  isOperator(obj: ?(Syntax | Term)) {
+    return (
+      (this.safeCheck(obj, 'punctuator') ||
+        this.safeCheck(obj, 'identifier') ||
+        this.safeCheck(obj, 'keyword')) &&
       ((obj instanceof T.RawSyntax && isOperator(obj.value)) ||
-        (obj instanceof Syntax && isOperator(obj)));
+        (obj instanceof Syntax && isOperator(obj)))
+    );
   }
 
-  isUpdateOperator(obj: Syntax | Term) {
-    return this.safeCheck(obj, 'punctuator', '++') ||
-      this.safeCheck(obj, 'punctuator', '--');
+  isCustomPrefixOperator(obj: any) {
+    if (this.isCompiletimeTransform(obj)) {
+      let t = this.getFromCompiletimeEnvironment(obj.value);
+      return t && t.value.assoc === 'prefix';
+    }
+    return false;
   }
 
-  safeResolve(obj: Syntax | Term, phase: number | {}) {
+  isCustomPostfixOperator(obj: any) {
+    if (this.isCompiletimeTransform(obj)) {
+      let t = this.getFromCompiletimeEnvironment(obj.value);
+      return t && t.value.assoc === 'postfix';
+    }
+    return false;
+  }
+
+  isCustomBinaryOperator(obj: any) {
+    if (this.isCompiletimeTransform(obj)) {
+      let t = this.getFromCompiletimeEnvironment(obj.value);
+      return t && (t.value.assoc === 'left' || t.value.assoc === 'right');
+    }
+    return false;
+  }
+
+  isUpdateOperator(obj: ?(Syntax | Term)) {
+    return (
+      this.safeCheck(obj, 'punctuator', '++') ||
+      this.safeCheck(obj, 'punctuator', '--')
+    );
+  }
+
+  safeResolve(obj: ?(Syntax | Term), phase: number | {}) {
     if (obj instanceof T.RawSyntax) {
       return typeof obj.value.resolve === 'function'
         ? Just(obj.value.resolve(phase))
@@ -2247,7 +2436,7 @@ export class Enforester {
     return Nothing();
   }
 
-  isTransform(obj: Syntax | Term, trans: any) {
+  isTransform(obj: ?(Syntax | Term), trans: any) {
     return this.safeResolve(obj, this.context.phase)
       .map(
         name =>
@@ -2257,7 +2446,7 @@ export class Enforester {
       .getOrElse(false);
   }
 
-  isTransformInstance(obj: Syntax | Term, trans: any) {
+  isTransformInstance(obj: ?(Syntax | Term), trans: any) {
     return this.safeResolve(obj, this.context.phase)
       .map(
         name =>
@@ -2267,139 +2456,144 @@ export class Enforester {
       .getOrElse(false);
   }
 
-  isFnDeclTransform(obj: Syntax | Term) {
+  isFnDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, FunctionDeclTransform);
   }
 
-  isVarDeclTransform(obj: Syntax | Term) {
+  isVarDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, VariableDeclTransform);
   }
 
-  isLetDeclTransform(obj: Syntax | Term) {
+  isLetDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, LetDeclTransform);
   }
 
-  isConstDeclTransform(obj: Syntax | Term) {
+  isConstDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ConstDeclTransform);
   }
 
-  isSyntaxDeclTransform(obj: Syntax | Term) {
+  isSyntaxDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, SyntaxDeclTransform);
   }
 
-  isSyntaxrecDeclTransform(obj: Syntax | Term) {
+  isSyntaxrecDeclTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, SyntaxrecDeclTransform);
   }
 
-  isReturnStmtTransform(obj: Syntax | Term) {
+  isReturnStmtTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ReturnStatementTransform);
   }
 
-  isWhileTransform(obj: Syntax | Term) {
+  isWhileTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, WhileTransform);
   }
 
-  isForTransform(obj: Syntax | Term) {
+  isForTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ForTransform);
   }
 
-  isSwitchTransform(obj: Syntax | Term) {
+  isSwitchTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, SwitchTransform);
   }
 
-  isBreakTransform(obj: Syntax | Term) {
+  isBreakTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, BreakTransform);
   }
 
-  isContinueTransform(obj: Syntax | Term) {
+  isContinueTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ContinueTransform);
   }
 
-  isDoTransform(obj: Syntax | Term) {
+  isDoTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, DoTransform);
   }
 
-  isDebuggerTransform(obj: Syntax | Term) {
+  isDebuggerTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, DebuggerTransform);
   }
 
-  isWithTransform(obj: Syntax | Term) {
+  isWithTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, WithTransform);
   }
 
-  isImportTransform(obj: Syntax | Term) {
+  isImportTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ImportTransform);
   }
 
-  isExportTransform(obj: Syntax | Term) {
+  isExportTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ExportTransform);
   }
 
-  isTryTransform(obj: Syntax | Term) {
+  isTryTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, TryTransform);
   }
 
-  isThrowTransform(obj: Syntax | Term) {
+  isThrowTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ThrowTransform);
   }
 
-  isIfTransform(obj: Syntax | Term) {
+  isOperatorDeclTransform(obj: ?(Syntax | Term)) {
+    return this.isTransform(obj, OperatorDeclTransform);
+  }
+
+  isIfTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, IfTransform);
   }
 
-  isNewTransform(obj: Syntax | Term) {
+  isNewTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, NewTransform);
   }
 
-  isSuperTransform(obj: Syntax | Term) {
+  isSuperTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, SuperTransform);
   }
 
-  isThisTransform(obj: Syntax | Term) {
+  isThisTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ThisTransform);
   }
 
-  isClassTransform(obj: Syntax | Term) {
+  isClassTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, ClassTransform);
   }
 
-  isYieldTransform(obj: Syntax | Term) {
+  isYieldTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, YieldTransform);
   }
 
-  isDefaultTransform(obj: Syntax | Term) {
+  isDefaultTransform(obj: ?(Syntax | Term)) {
     return this.isTransform(obj, DefaultTransform);
   }
 
-  isCompiletimeTransform(obj: Syntax | Term) {
+  isCompiletimeTransform(obj: ?(Syntax | Term)) {
     return this.isTransformInstance(obj, CompiletimeTransform);
   }
 
-  isModuleNamespaceTransform(obj: Term) {
+  isModuleNamespaceTransform(obj: ?Term) {
     return this.isTransformInstance(obj, ModuleNamespaceTransform);
   }
 
-  isVarBindingTransform(obj: Syntax | Term) {
+  isVarBindingTransform(obj: ?(Syntax | Term)) {
     return this.isTransformInstance(obj, VarBindingTransform);
   }
 
-  getFromCompiletimeEnvironment(term: Syntax) {
+  getFromCompiletimeEnvironment(term: any) {
     if (this.context.env.has(term.resolve(this.context.phase))) {
       return this.context.env.get(term.resolve(this.context.phase));
     }
     return this.context.store.get(term.resolve(this.context.phase));
   }
 
-  lineNumberEq(a: ?(T.Term | Syntax), b: ?(Syntax | T.Term)) {
+  lineNumberEq(a: ?(Term | Syntax), b: ?(Syntax | Term)) {
     if (!(a && b)) {
       return false;
     }
     return getLineNumber(a) === getLineNumber(b);
   }
 
-  matchRawDelimiter(): List<T.SyntaxTerm> {
+  matchRawDelimiter(): List<Term> {
     let lookahead = this.advance();
     if (lookahead instanceof T.RawDelimiter) {
+      // $FlowFixMe: terms are currently typed with arrays not lists
       return lookahead.inner;
     }
     throw this.createError(lookahead, 'expecting a RawDelimiter');
@@ -2460,7 +2654,7 @@ export class Enforester {
     throw this.createError(lookahead, 'expecting a template literal');
   }
 
-  matchParens(): List<T.SyntaxTerm> {
+  matchParens(): List<Term> {
     let lookahead = this.peek();
     if (this.isParens(lookahead)) {
       let inner = this.matchRawDelimiter();
@@ -2478,7 +2672,7 @@ export class Enforester {
     throw this.createError(lookahead, 'expecting curly braces');
   }
 
-  matchSquares(): List<T.SyntaxTerm> {
+  matchSquares(): List<Term> {
     let lookahead = this.peek();
     if (this.isBrackets(lookahead)) {
       let inner = this.matchRawDelimiter();
@@ -2513,7 +2707,7 @@ export class Enforester {
     throw this.createError(lookahead, 'expecting a punctuator');
   }
 
-  createError(stx: Syntax | Term, message: string) {
+  createError(stx: ?(Syntax | Term), message: string) {
     let ctx = '';
     let offending = stx;
     if (this.rest.size > 0) {
@@ -2535,7 +2729,7 @@ export class Enforester {
         })
         .join(' ');
     } else {
-      ctx = offending.toString();
+      ctx = offending == null ? '' : offending.toString();
     }
     return new Error(message + '\n' + ctx);
   }

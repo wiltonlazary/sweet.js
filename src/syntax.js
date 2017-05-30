@@ -159,6 +159,7 @@ export let Types: TypesHelper = {
         stx,
       ),
   },
+  // $FlowFixMe: cleanup all this
   braces: {
     match: token =>
       Types.delimiter.match(token) &&
@@ -186,6 +187,7 @@ export let Types: TypesHelper = {
       });
     },
   },
+  // $FlowFixMe: cleanup all this
   brackets: {
     match: token =>
       Types.delimiter.match(token) &&
@@ -213,6 +215,7 @@ export let Types: TypesHelper = {
       });
     },
   },
+  // $FlowFixMe: cleanup all this
   parens: {
     match: token =>
       Types.delimiter.match(token) &&
@@ -410,7 +413,9 @@ export default class Syntax {
     stxScopes = allScopes.concat(stxScopes);
     if (
       stxScopes.size === 0 ||
-      !(this.match('identifier') || this.match('keyword'))
+      !(this.match('identifier') ||
+        this.match('keyword') ||
+        this.match('punctuator'))
     ) {
       return this.token.value;
     }
@@ -428,26 +433,26 @@ export default class Syntax {
           })
           .sort(sizeDecending);
 
-        if (
-          biggestBindingPair.size >= 2 &&
-          biggestBindingPair.get(0).scopes.size ===
-            biggestBindingPair.get(1).scopes.size
-        ) {
-          let debugBase = '{' +
-            stxScopes.map(s => s.toString()).join(', ') +
-            '}';
-          let debugAmbigousScopesets = biggestBindingPair
-            .map(({ scopes }) => {
-              return '{' + scopes.map(s => s.toString()).join(', ') + '}';
-            })
-            .join(', ');
-          throw new Error(
-            'Scopeset ' +
-              debugBase +
-              ' has ambiguous subsets ' +
-              debugAmbigousScopesets,
-          );
-        } else if (biggestBindingPair.size !== 0) {
+        // if (
+        //   biggestBindingPair.size >= 2 &&
+        //   biggestBindingPair.get(0).scopes.size ===
+        //     biggestBindingPair.get(1).scopes.size
+        // ) {
+        //   let debugBase =
+        //     '{' + stxScopes.map(s => s.toString()).join(', ') + '}';
+        //   let debugAmbigousScopesets = biggestBindingPair
+        //     .map(({ scopes }) => {
+        //       return '{' + scopes.map(s => s.toString()).join(', ') + '}';
+        //     })
+        //     .join(', ');
+        //   throw new Error(
+        //     'Scopeset ' +
+        //       debugBase +
+        //       ' has ambiguous subsets ' +
+        //       debugAmbigousScopesets,
+        //   );
+        // } else
+        if (biggestBindingPair.size !== 0) {
           let bindingStr = biggestBindingPair.get(0).binding.toString();
           if (Maybe.isJust(biggestBindingPair.get(0).alias)) {
             // null never happens because we just checked if it is a Just
@@ -600,11 +605,13 @@ export default class Syntax {
     if (!Types[type]) {
       throw new Error(type + ' is an invalid type');
     }
-    return Types[type].match(this.token) &&
+    return (
+      Types[type].match(this.token) &&
       (value == null ||
         (value instanceof RegExp
           ? value.test(this.val())
-          : this.val() == value));
+          : this.val() == value))
+    );
   }
 
   isIdentifier(value: string) {
