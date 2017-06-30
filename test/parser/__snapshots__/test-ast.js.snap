@@ -1,0 +1,118 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`does include the use strict directive in the AST 1`] = `
+Module {
+  "directives": Array [
+    Object {
+      "rawValue": "use strict",
+      "type": "Directive",
+    },
+  ],
+  "items": Array [],
+  "loc": null,
+  "type": "Module",
+}
+`;
+
+exports[`does not include the lang directive in the AST 1`] = `
+Module {
+  "directives": Array [],
+  "items": Array [],
+  "loc": null,
+  "type": "Module",
+}
+`;
+
+exports[`includes export declaration in AST 1`] = `
+Module {
+  "directives": Array [],
+  "items": Array [
+    VariableDeclarationStatement {
+      "declaration": VariableDeclaration {
+        "declarators": Array [
+          VariableDeclarator {
+            "binding": BindingIdentifier {
+              "loc": null,
+              "name": "x_0",
+              "type": "BindingIdentifier",
+            },
+            "init": LiteralNumericExpression {
+              "loc": null,
+              "type": "LiteralNumericExpression",
+              "value": 1,
+            },
+            "loc": null,
+            "type": "VariableDeclarator",
+          },
+        ],
+        "kind": "var",
+        "loc": null,
+        "type": "VariableDeclaration",
+      },
+      "loc": null,
+      "type": "VariableDeclarationStatement",
+    },
+    ExportFrom {
+      "loc": null,
+      "moduleSpecifier": null,
+      "namedExports": Array [
+        ExportSpecifier {
+          "exportedName": "x",
+          "loc": null,
+          "name": "x_0",
+          "type": "ExportSpecifier",
+        },
+      ],
+      "type": "ExportFrom",
+    },
+  ],
+  "loc": null,
+  "type": "Module",
+}
+`;
+
+exports[`includes export in AST 1`] = `
+Module {
+  "directives": Array [],
+  "items": Array [
+    ExportFrom {
+      "loc": null,
+      "moduleSpecifier": null,
+      "namedExports": Array [
+        ExportSpecifier {
+          "exportedName": "b",
+          "loc": null,
+          "name": "b",
+          "type": "ExportSpecifier",
+        },
+      ],
+      "type": "ExportFrom",
+    },
+  ],
+  "loc": null,
+  "type": "Module",
+}
+`;
+
+exports[`includes export with renaming in AST 1`] = `
+Module {
+  "directives": Array [],
+  "items": Array [
+    ExportFrom {
+      "loc": null,
+      "moduleSpecifier": null,
+      "namedExports": Array [
+        ExportSpecifier {
+          "exportedName": "c",
+          "loc": null,
+          "name": "b",
+          "type": "ExportSpecifier",
+        },
+      ],
+      "type": "ExportFrom",
+    },
+  ],
+  "loc": null,
+  "type": "Module",
+}
+`;

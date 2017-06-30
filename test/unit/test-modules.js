@@ -14,9 +14,43 @@ export syntax m = function (ctx) {
 
     'main.js': `
 import { m } from "./m.js";
-output = m`,
+output = m`
   },
-  1,
+  1
+);
+
+test(
+  'should export a simple operator',
+  evalWithStore,
+  {
+    './m.js': `
+'lang sweet.js';
+export operator sub left 2 = (left, right) => {
+  return #\`\${left} - \${right}\`;
+}`,
+
+    'main.js': `
+import { sub } from "./m.js";
+output = 2 sub 2`
+  },
+  0
+);
+
+test(
+  'should export a simple punctuator operator',
+  evalWithStore,
+  {
+    './m.js': `
+'lang sweet.js';
+export operator - left 2 = (left, right) => {
+  return #\`\${left} + \${right}\`;
+}`,
+
+    'main.js': `
+import { - } from "./m.js";
+output = 2 - 2`
+  },
+  4
 );
 
 test(
@@ -36,9 +70,9 @@ syntax m = function (ctx) {
   }
   return #\`false\`;
 }
-output = m;`,
+output = m;`
   },
-  true,
+  true
 );
 
 test(
@@ -58,9 +92,9 @@ test(
       return id(#\`1\`);
     }
     output = m;
-  `,
+  `
   },
-  1,
+  1
 );
 
 test(
@@ -80,9 +114,9 @@ test(
       return id(#\`1\`);
     }
     output = m;
-  `,
+  `
   },
-  1,
+  1
 );
 
 test(
@@ -103,9 +137,9 @@ test(
       return #\`1\`;
     }
     output = m;
-  `,
+  `
   },
-  1,
+  1
 );
 
 test(
@@ -131,9 +165,9 @@ test(
       return #\`1\`;
     }
     output = test;
-  `,
+  `
   },
-  1,
+  1
 );
 
 test(
@@ -151,9 +185,9 @@ syntax m = ctx => {
   return id(#\`1\`);
 }
 output = m
-`,
+`
   },
-  1,
+  1
 );
 
 test(
@@ -171,9 +205,9 @@ syntax m = ctx => {
   return di(#\`1\`);
 }
 output = m
-`,
+`
   },
-  1,
+  1
 );
 
 test(
@@ -190,9 +224,9 @@ syntax m = ctx => {
   return id(#\`1\`);
 }
 output = m
-`,
+`
   },
-  1,
+  1
 );
 
 test(
@@ -207,9 +241,9 @@ import * as M from './mod.js' for syntax;
 syntax m = ctx => {
   return M.id(#\`1\`);
 }
-output = m`,
+output = m`
   },
-  1,
+  1
 );
 
 test(
@@ -229,9 +263,9 @@ import * as M from './mod.js' for syntax;
 syntax m = ctx => {
   return M.id(#\`1\`);
 }
-output = m`,
+output = m`
   },
-  1,
+  1
 );
 
 let helperSrc = readFileSync('./helpers.js', 'utf8');
@@ -251,9 +285,9 @@ test(
       return #\`false\`;
     }
     output = m if
-  `,
+  `
   },
-  true,
+  true
 );
 
 test(
@@ -276,9 +310,32 @@ test(
       'lang sweet.js';
       import { m } from 'a';
       output = m foo;
-    `,
+    `
   },
-  false,
+  false
+);
+
+test(
+  'only invokes a module once per-phase',
+  evalWithStore,
+  {
+    lib: `
+    'lang sweet.js';
+    export const x = 1;
+    `,
+
+    m: `
+    'lang sweet.js';
+    import { x } from 'lib' for syntax;
+    export syntax m = ctx => #\`1\`;`,
+
+    'main.js': `
+    'lang sweet.js';
+    import { x } from 'lib' for syntax;
+    import { m } from 'm';
+    output = true`
+  },
+  true
 );
 
 // test('importing a chain for syntax works', evalWithStore, {
