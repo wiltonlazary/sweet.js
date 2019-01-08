@@ -14,7 +14,10 @@ import { ALL_PHASES } from './syntax';
 import ASTDispatcher from './ast-dispatcher';
 import Syntax from './syntax.js';
 import ScopeReducer from './scope-reducer';
-import ModuleVisitor, { bindImports } from './module-visitor';
+import ModuleVisitor, {
+  bindImports,
+  isBoundToCompiletime,
+} from './module-visitor';
 
 // $FlowFixMe: flow doesn't know about the CloneReducer yet
 class RegisterBindingsReducer extends Term.CloneReducer {
@@ -154,7 +157,43 @@ export default class TokenExpander extends ASTDispatcher {
         mod.path,
       );
     }
-    bindImports(term, mod, this.context.phase, this.context);
+    bindImports(
+      term,
+      mod,
+      this.context.phase,
+      this.context,
+      this.context.isEntrypoint,
+    );
+    let defaultBinding = null;
+    let namedImports = List();
+    if (term.defaultBinding != null) {
+      if (!isBoundToCompiletime(term.defaultBinding.name, this.context.store)) {
+        defaultBinding = term.defaultBinding;
+      }
+    }
+    if (term instanceof S.Import) {
+      namedImports = term.namedImports.filter(
+        specifier =>
+          !isBoundToCompiletime(specifier.binding.name, this.context.store),
+      );
+      if (defaultBinding == null && namedImports.size === 0) {
+        return new S.EmptyStatement();
+      }
+      return new S.Import({
+        forSyntax: term.forSyntax,
+        moduleSpecifier: term.moduleSpecifier,
+        defaultBinding,
+        namedImports,
+      });
+    } else if (term instanceof S.ImportNamespace) {
+      return new S.ImportNamespace({
+        forSyntax: term.forSyntax,
+        moduleSpecifier: term.moduleSpecifier,
+        defaultBinding,
+        namespaceBinding: term.namespaceBinding,
+      });
+    }
+    // return a new import filtered to just the runtime imports
     return term;
   }
 

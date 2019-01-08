@@ -14,35 +14,37 @@ const extractDeclaration = _.cond([
     _.T,
     term => {
       throw new Error(`Expecting an Export or ExportDefault but got ${term}`);
-    }
-  ]
+    },
+  ],
 ]);
 
-const ExpSpec = x => ({ exportedName: x });
+const ExpSpec = x => ({
+  exportedName: x,
+});
 
 const extractDeclarationNames = _.cond([
   [S.isVariableDeclarator, ({ binding }) => List.of(binding.name)],
   [
     S.isVariableDeclaration,
-    ({ declarators }) => declarators.flatMap(extractDeclarationNames)
+    ({ declarators }) => declarators.flatMap(extractDeclarationNames),
   ],
   [S.isFunctionDeclaration, ({ name }) => List.of(name.name)],
-  [S.isClassDeclaration, ({ name }) => List.of(name.name)]
+  [S.isClassDeclaration, ({ name }) => List.of(name.name)],
 ]);
 
 const extractDeclarationSpecifiers = _.cond([
   [S.isVariableDeclarator, ({ binding }) => List.of(ExpSpec(binding.name))],
   [
     S.isVariableDeclaration,
-    ({ declarators }) => declarators.flatMap(extractDeclarationSpecifiers)
+    ({ declarators }) => declarators.flatMap(extractDeclarationSpecifiers),
   ],
   [S.isFunctionDeclaration, ({ name }) => List.of(ExpSpec(name.name))],
-  [S.isClassDeclaration, ({ name }) => List.of(ExpSpec(name.name))]
+  [S.isClassDeclaration, ({ name }) => List.of(ExpSpec(name.name))],
 ]);
 
 type ExportSpecifier = {
   name?: Syntax,
-  exportedName: Syntax
+  exportedName: Syntax,
 };
 
 function extractSpecifiers(term: any): List<ExportSpecifier> {
@@ -52,13 +54,20 @@ function extractSpecifiers(term: any): List<ExportSpecifier> {
     return List();
   } else if (S.isExportFrom(term)) {
     return term.namedExports;
+  } else if (S.isExportLocals(term)) {
+    return term.namedExports.map(({ name, exportedName }) => ({
+      name: name == null ? null : name.name,
+      exportedName: exportedName,
+    }));
   }
   throw new Error(`Unknown export type`);
 }
 
 function wrapStatement(declaration: Term) {
   if (S.isVariableDeclaration(declaration)) {
-    return new T.VariableDeclarationStatement({ declaration });
+    return new T.VariableDeclarationStatement({
+      declaration,
+    });
   }
   return declaration;
 }
@@ -72,10 +81,10 @@ function makeVarDeclStmt(name: T.BindingIdentifier, expr: T.Expression) {
       declarators: List.of(
         new T.VariableDeclarator({
           binding: name,
-          init: expr
-        })
-      )
-    })
+          init: expr,
+        }),
+      ),
+    }),
   });
 }
 
@@ -119,49 +128,56 @@ export default class SweetModule {
           let stmt = wrapStatement(decl);
           let names = extractDeclarationNames(decl);
           body.push(stmt);
-          let exp = new T.ExportFrom({
+          // TODO: support ExportFrom
+          let exp = new T.ExportLocals({
             moduleSpecifier: null,
             namedExports: names.map(
               name =>
-                new T.ExportSpecifier({
-                  name,
-                  exportedName: name
-                })
-            )
+                new T.ExportLocalSpecifier({
+                  name: new T.IdentifierExpression({
+                    name,
+                  }),
+                  exportedName: name,
+                }),
+            ),
           });
           body.push(exp);
           exports.push(exp);
           this.exportedNames = this.exportedNames.concat(
-            extractSpecifiers(exp)
+            extractSpecifiers(exp),
           );
-        } else if (item instanceof T.ExportFrom) {
-          let exp = new T.ExportFrom({
-            moduleSpecifier: item.moduleSpecifier,
+        } else if (item instanceof T.ExportLocals) {
+          let exp = new T.ExportLocals({
             namedExports: item.namedExports.map(({ name, exportedName }) => {
               if (name == null) {
-                return new T.ExportSpecifier({
-                  name: exportedName,
-                  exportedName
+                return new T.ExportLocalSpecifier({
+                  name: new T.IdentifierExpression({
+                    name: exportedName,
+                  }),
+                  exportedName,
                 });
               }
-              return new T.ExportSpecifier({ name, exportedName });
-            })
+              return new T.ExportLocalSpecifier({
+                name,
+                exportedName,
+              });
+            }),
           });
           body.push(exp);
           exports.push(exp);
           this.exportedNames = this.exportedNames.concat(
-            extractSpecifiers(exp)
+            extractSpecifiers(exp),
           );
         } else {
           exports.push(item);
           body.push(item);
           this.exportedNames = this.exportedNames.concat(
-            extractSpecifiers(item)
+            extractSpecifiers(item),
           );
           if (S.isExportDefault(item)) {
             this.defaultExport = Syntax.fromIdentifier('_default');
             this.exportedNames = this.exportedNames.push(
-              ExpSpec(this.defaultExport)
+              ExpSpec(this.defaultExport),
             );
           }
         }
@@ -184,7 +200,7 @@ export default class SweetModule {
         if (S.isExportDefault(item)) {
           let decl = extractDeclaration(item);
           let def = new T.BindingIdentifier({
-            name: this.defaultExport
+            name: this.defaultExport,
           });
           if (S.isFunctionDeclaration(decl) || S.isClassDeclaration(decl)) {
             runtime.push(decl);
@@ -192,8 +208,10 @@ export default class SweetModule {
             runtime.push(
               makeVarDeclStmt(
                 def,
-                new T.IdentifierExpression({ name: decl.name.name })
-              )
+                new T.IdentifierExpression({
+                  name: decl.name.name,
+                }),
+              ),
             );
           } else {
             // expression so bind it to _default
@@ -235,8 +253,8 @@ export default class SweetModule {
 
   parse() {
     return new T.Module({
-      items: this.items,
-      directives: this.directives
+      items: (this.imports: any).concat(this.items),
+      directives: this.directives,
       // $FlowFixMe: flow doesn't know about reduce yet
     }).reduce(new SweetToShiftReducer(0));
   }

@@ -93,7 +93,7 @@ const passExcluded = [
   '538.script.js',
   '680.script.js',
   '681.script.js',
-  '995.script.js'
+  '995.script.js',
 ];
 
 const failExcluded = [
@@ -101,6 +101,21 @@ const failExcluded = [
   '160.script.js',
   '822.script.js',
   '833.script.js',
+  '892.script.js',
+  '891.script.js',
+  '115.script.js',
+  '114.script.js',
+
+  '533.script.js',
+  '58.script.js',
+  '59.script.js',
+  '60.script.js',
+  '63.script.js',
+  '751.module.js',
+  '752.module.js',
+  '754.module.js',
+  '756.module.js',
+  '757.module.js',
 
   '0.script.js',
   '19.script.js',
@@ -402,7 +417,7 @@ const failExcluded = [
   '912.module.js',
   '913.module.js',
   '924.module.js',
-  '965.module.js'
+  '965.module.js',
 ];
 
 // eslint-disable-next-line no-unused-vars
@@ -653,7 +668,7 @@ const earlyExcluded = [
   '535.module.js',
   '536.module.js',
   '537.module.js',
-  '538.module.js'
+  '538.module.js',
 ];
 
 const PARSER_TEST_DIR = 'test262-parser-tests';
@@ -668,14 +683,14 @@ function mkTester(subdir, testDir) {
   function f(t, fname) {
     let result = compile(
       `./${testDir}/${subdir}/${fname}`,
-      new NodeLoader(__dirname)
+      new NodeLoader(__dirname),
     );
     t.not(result, null);
   }
   f.title = (title, fname, expected) => {
     let src = fs.readFileSync(
       `./test/parser/${testDir}/${subdir}/${fname}`,
-      'utf8'
+      'utf8',
     );
     return `${fname}:
 ${src}
@@ -687,13 +702,13 @@ ${src}
 function mkFailTester(subdir, testDir) {
   function f(t, fname) {
     t.throws(() =>
-      compile(`./${testDir}/${subdir}/${fname}`, new NodeLoader(__dirname))
+      compile(`./${testDir}/${subdir}/${fname}`, new NodeLoader(__dirname)),
     );
   }
   f.title = (title, fname, expected) => {
     let src = fs.readFileSync(
       `./test/parser/${testDir}/${subdir}/${fname}`,
-      'utf8'
+      'utf8',
     );
     return `${fname}:
 ${src}

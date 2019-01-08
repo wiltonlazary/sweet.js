@@ -10,41 +10,67 @@ import SweetModule from './sweet-module';
 import { List } from 'immutable';
 import SweetToShiftReducer from './sweet-to-shift-reducer';
 import codegen, { FormattedCodeGen } from 'shift-codegen';
+import Syntax from './syntax';
 
 import type { Context } from './sweet-loader';
+
+export function isBoundToCompiletime(name: Syntax, store: Map<*, *>) {
+  let resolvedName = name.resolve(0);
+  if (store.has(resolvedName)) {
+    return store.get(resolvedName) instanceof CompiletimeTransform;
+  }
+  return false;
+}
 
 export function bindImports(
   impTerm: any,
   exModule: SweetModule,
   phase: any,
-  context: Context
+  context: Context,
+  isEntrypoint: boolean,
 ) {
   let names = [];
   let phaseToBind = impTerm.forSyntax ? phase + 1 : phase;
   if (impTerm.defaultBinding != null && impTerm instanceof T.Import) {
     let name = impTerm.defaultBinding.name;
     let exportName = exModule.exportedNames.find(
-      exName => exName.exportedName.val() === '_default'
+      exName => exName.exportedName.val() === '_default',
     );
     if (exportName != null) {
       let newBinding = gensym('_default');
       let toForward = exportName.exportedName;
-      context.bindings.addForward(name, toForward, newBinding, phaseToBind);
+
+      if (
+        !isEntrypoint ||
+        isBoundToCompiletime(toForward, context.store) ||
+        impTerm.forSyntax
+      ) {
+        context.bindings.addForward(name, toForward, newBinding, phaseToBind);
+      }
       names.push(name);
     }
   }
   if (impTerm.namedImports) {
     impTerm.namedImports.forEach(specifier => {
       let name = specifier.binding.name;
-      let exportName = exModule.exportedNames.find(
-        exName => exName.exportedName.val() === name.val()
-      );
+      let exportName = exModule.exportedNames.find(exName => {
+        if (exName.exportedName != null) {
+          return exName.exportedName.val() === name.val();
+        }
+        return exName.name && exName.name.val() === name.val();
+      });
       if (exportName != null) {
         let newBinding = gensym(name.val());
         let toForward = exportName.name
           ? exportName.name
           : exportName.exportedName;
-        context.bindings.addForward(name, toForward, newBinding, phaseToBind);
+        if (
+          !isEntrypoint ||
+          isBoundToCompiletime(toForward, context.store) ||
+          impTerm.forSyntax
+        ) {
+          context.bindings.addForward(name, toForward, newBinding, phaseToBind);
+        }
         names.push(name);
       }
     });
@@ -54,12 +80,12 @@ export function bindImports(
     let newBinding = gensym(name.val());
     context.store.set(
       newBinding.toString(),
-      new ModuleNamespaceTransform(name, exModule)
+      new ModuleNamespaceTransform(name, exModule),
     );
     context.bindings.add(name, {
       binding: newBinding,
       phase: phaseToBind,
-      skipDup: false
+      skipDup: false,
     });
 
     names.push(name);
@@ -80,7 +106,7 @@ export default class {
         let mod = this.context.loader.get(
           imp.moduleSpecifier.val(),
           phase + 1,
-          cwd
+          cwd,
         );
         this.visit(mod, phase + 1, store, mod.path);
         this.invoke(mod, phase + 1, store, mod.path);
@@ -88,11 +114,11 @@ export default class {
         let mod = this.context.loader.get(
           imp.moduleSpecifier.val(),
           phase,
-          cwd
+          cwd,
         );
         this.visit(mod, phase, store, mod.path);
       }
-      bindImports(imp, mod, phase, this.context);
+      bindImports(imp, mod, phase, this.context, false);
     });
     for (let term of mod.compiletimeItems()) {
       if (S.isSyntaxDeclarationStatement(term)) {
@@ -111,10 +137,10 @@ export default class {
         let mod = this.context.loader.get(
           imp.moduleSpecifier.val(),
           phase,
-          cwd
+          cwd,
         );
         this.invoke(mod, phase, store, mod.path);
-        bindImports(imp, mod, phase, this.context);
+        bindImports(imp, mod, phase, this.context, false);
       }
     });
     let items = mod.runtimeItems();
@@ -127,7 +153,7 @@ export default class {
     }
     let parsed = new T.Module({
       directives: List(),
-      items
+      items,
       // $FlowFixMe: flow doesn't know about reduce yet
     }).reduce(new SweetToShiftReducer(phase));
 
@@ -145,8 +171,8 @@ export default class {
         decl.init,
         _.merge(this.context, {
           phase: phase + 1,
-          store
-        })
+          store,
+        }),
       );
 
       collectBindings(decl.binding).forEach(stx => {
@@ -156,7 +182,7 @@ export default class {
           this.context.bindings.add(stx, {
             binding: newBinding,
             phase: phase,
-            skipDup: false
+            skipDup: false,
           });
         }
         let resolvedName = stx.resolve(phase);
@@ -167,8 +193,8 @@ export default class {
             type: compiletimeType,
             prec: decl.prec == null ? void 0 : decl.prec.val(),
             assoc: decl.assoc == null ? void 0 : decl.assoc.val(),
-            f: val
-          })
+            f: val,
+          }),
         );
       });
     });
@@ -183,7 +209,7 @@ export default class {
           this.context.bindings.add(stx, {
             binding: newBinding,
             phase: phase,
-            skipDup: term.kind === 'var'
+            skipDup: term.kind === 'var',
           });
         }
       });
@@ -197,7 +223,7 @@ export default class {
         this.context.bindings.add(stx, {
           binding: newBinding,
           phase: phase,
-          skipDup: false
+          skipDup: false,
         });
       }
     });

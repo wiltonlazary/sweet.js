@@ -66,3 +66,23 @@ test(
 let x = 100;
 let x = 200`,
 );
+
+test(
+  'should handle shorthand destructuring correctly',
+  evalWithOutput,
+  `
+  var { x } = { x: 1 };
+  output = x;
+  `,
+  1,
+);
+
+test(
+  'should handle shorthand destructuring with default values correctly',
+  evalWithOutput,
+  `
+  var { x = 1 } = { };
+  output = x;
+  `,
+  1,
+);

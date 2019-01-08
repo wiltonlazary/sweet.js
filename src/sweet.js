@@ -14,7 +14,11 @@ function compileModule(
   loader: SweetLoader,
   refererName?: string,
 ) {
-  return loader.compile(entryPath, refererName, false);
+  return loader.compile(entryPath, {
+    refererName,
+    enforceLangPragma: false,
+    isEntrypoint: true,
+  });
 }
 
 export function parse(
@@ -34,7 +38,8 @@ export function compile(
   loader: SweetLoader,
   options?: CompileOptions,
 ) {
-  let refererName, noBabel = true;
+  let refererName,
+    noBabel = true;
   if (options != null) {
     refererName = options.refererName;
     noBabel = options.noBabel;
